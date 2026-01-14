@@ -1,0 +1,27 @@
+asegurate que estas 3 fases esten implementadas correctamente:
+Phased Implementation Plan
+Phase 1: Spatial Hash Grid (Recommended First)
+Effort: 2-3 days | Impact: O(n²) → O(n×k) for collision/targeting
+
+Create internal/game/spatial/ package
+Implement SpatialGrid with tests
+Integrate into Engine.tick()
+Update 
+findTarget
+ and 
+ResolveCollisions
+Benchmark before/after with 500+ agents
+Phase 2: Sweep-and-Prune (Optional Refinement)
+Effort: 1-2 days | Impact: Better pair generation for physics-heavy scenes
+
+Implement SweepAndPrune
+Use as secondary filter after grid query
+Beneficial if many entities cluster in few cells
+Phase 3: Flow Fields (AI Enhancement)
+Effort: 3-4 days | Impact: Intelligent swarm behavior, reduced A* overhead
+
+Implement FlowField with caching
+Add FlowFieldManager for multi-goal scenarios
+Integrate with 
+combatBehavior
+ for approach vector

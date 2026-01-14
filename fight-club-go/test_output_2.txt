@@ -1,0 +1,14 @@
+# fight-club/tests/game_test [fight-club/tests/game.test]
+tests\game\engine_test.go:244:2: declared and not used: damageCalled
+tests\game\engine_test.go:245:2: declared and not used: killCalled
+tests\game\player_test.go:183:31: not enough arguments in call to players[0].ResolveCollisions
+	have ([]*game.Player)
+	want ([]*game.Player, uint32, *spatial.SpatialGrid)
+tests\game\player_test.go:224:32: not enough arguments in call to player.Update
+	have ([]*game.Player, number, *game.Engine)
+	want ([]*game.Player, uint32, *spatial.SpatialGrid, float64, *game.Engine)
+tests\game\player_test.go:245:34: not enough arguments in call to player1.Update
+	have ([]*game.Player, number, *game.Engine)
+	want ([]*game.Player, uint32, *spatial.SpatialGrid, float64, *game.Engine)
+FAIL	fight-club/tests/game [build failed]
+FAIL

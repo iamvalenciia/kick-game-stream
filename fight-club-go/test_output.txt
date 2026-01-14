@@ -1,0 +1,14 @@
+# fight-club/tests/game_test [fight-club/tests/game.test]
+tests\game\animation_test.go:14:12: undefined: game
+tests\game\animation_test.go:38:56: undefined: game
+tests\game\animation_test.go:39:61: undefined: game
+tests\game\animation_test.go:43:24: undefined: game
+tests\game\animation_test.go:52:10: undefined: game
+tests\game\animation_test.go:62:23: undefined: game
+tests\game\animation_test.go:76:11: undefined: game
+tests\game\animation_test.go:83:11: undefined: game
+tests\game\animation_test.go:96:10: undefined: game
+tests\game\animation_test.go:111:17: undefined: game
+tests\game\animation_test.go:111:17: too many errors
+FAIL	fight-club/tests/game [build failed]
+FAIL

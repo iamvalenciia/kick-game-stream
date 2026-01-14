@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fight Club - Admin Panel (Go)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            color: #ff6b6b;
+            text-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+        }
+
+        .header .subtitle {
+            color: #888;
+            margin-top: 5px;
+        }
+
+        #connection-status {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-top: 10px;
+        }
+
+        #connection-status.connected {
+            color: #4ecdc4;
+        }
+
+        #connection-status.disconnected {
+            color: #ff6b6b;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel h2 {
+            color: #4ecdc4;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        .stat-box {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-box .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #4ecdc4;
+        }
+
+        .stat-box .label {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        #stream-toggle {
+            width: 100%;
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #4ecdc4, #44bd9f);
+            color: white;
+            transition: all 0.3s;
+            margin-bottom: 15px;
+        }
+
+        #stream-toggle:hover {
+            transform: scale(1.02);
+            box-shadow: 0 5px 20px rgba(78, 205, 196, 0.4);
+        }
+
+        #stream-toggle.streaming {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+        }
+
+        #stream-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        #stream-stats .stat {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        #stream-stats .stat label {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        #stream-stats .stat span {
+            display: block;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        #stream-stats .stat span.live {
+            color: #ff6b6b;
+        }
+
+        #stream-stats .stat span.offline {
+            color: #888;
+        }
+
+        #players-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .player-item {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .player-item.dead {
+            opacity: 0.5;
+        }
+
+        .player-item .rank {
+            color: #888;
+            width: 30px;
+        }
+
+        .player-item .name {
+            font-weight: bold;
+            flex: 1;
+        }
+
+        .player-item .kills,
+        .player-item .money,
+        .player-item .hp {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .add-player {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .add-player input {
+            flex: 1;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            font-size: 1rem;
+        }
+
+        .add-player button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #4ecdc4;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: #4ecdc4;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>🎮 THE FIGHT CLUB</h1>
+        <p class="subtitle">Go Engine Admin Panel</p>
+        <div id="connection-status" class="disconnected">🔴 Connecting...</div>
+    </div>
+
+    <div class="container">
+        <!-- Stats Panel -->
+        <div class="panel">
+            <h2>📊 Game Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="value" id="player-count">0</div>
+                    <div class="label">Players</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value" id="alive-count">0</div>
+                    <div class="label">Alive</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value" id="kill-count">0</div>
+                    <div class="label">Total Kills</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stream Panel -->
+        <div class="panel">
+            <h2>📺 Stream Control</h2>
+            <button id="stream-toggle">▶️ Start Stream</button>
+            <div id="stream-stats">
+                <div class="stat">
+                    <label>Status:</label>
+                    <span class="offline">⚫ Offline</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kick Chat Panel -->
+        <div class="panel">
+            <h2>💬 Kick Chat</h2>
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                <div id="kick-status" style="display: flex; align-items: center; gap: 8px;">
+                    <span id="kick-indicator"
+                        style="width: 12px; height: 12px; border-radius: 50%; background: #ff6b6b;"></span>
+                    <span id="kick-status-text">Not Connected</span>
+                </div>
+            </div>
+            <button id="kick-auth-btn" onclick="window.open('/api/kick/auth', 'KickOAuth', 'width=600,height=700')"
+                style="
+                width: 100%;
+                padding: 12px 20px;
+                font-size: 1rem;
+                font-weight: bold;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                background: linear-gradient(135deg, #53fc18, #41c911);
+                color: white;
+                transition: all 0.3s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+            ">
+                🤖 Login as Bot
+            </button>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 10px; text-align: center;">
+                Login with your Bot Account to enable kill feed & chat commands
+            </p>
+        </div>
+
+        <!-- Players Panel -->
+        <div class="panel" style="grid-column: span 2;">
+            <h2>👥 Players (Top 20)</h2>
+            <div class="add-player">
+                <input type="text" id="player-name" placeholder="Enter player name...">
+                <button id="add-player-btn">➕ Add Player</button>
+            </div>
+
+            <div class="batch-add-player" style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="batch-btn" data-count="10"
+                    style="flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #ccc; border-radius: 6px; cursor: pointer;">+10</button>
+                <button class="batch-btn" data-count="20"
+                    style="flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #ccc; border-radius: 6px; cursor: pointer;">+20</button>
+                <button class="batch-btn" data-count="50"
+                    style="flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #ccc; border-radius: 6px; cursor: pointer;">+50</button>
+                <button class="batch-btn" data-count="100"
+                    style="flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #ccc; border-radius: 6px; cursor: pointer;">+100</button>
+                <button class="batch-btn" data-count="200"
+                    style="flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #ccc; border-radius: 6px; cursor: pointer;">+200</button>
+            </div>
+            <div id="players-list">
+                <p style="color: #666; text-align: center;">No players yet...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Fight Club Go Engine v1.0 |
+            <a href="/api/stats" target="_blank">API Stats</a> |
+            Streaming to Kick.com
+        </p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

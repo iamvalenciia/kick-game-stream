@@ -1,0 +1,47 @@
+# Fight Club - Go Engine
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+build/
+dist/
+
+# Go vendor (if used)
+vendor/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Kick OAuth Tokens
+.kick-tokens.json
+.kick-tokens-go.json
+
+# Event log (can be large)
+events.jsonl
+
+# Test output files
+*_test_results.txt
+coverage/
+
+# Docker
+.docker/
+.env
+
