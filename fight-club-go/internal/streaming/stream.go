@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"fight-club/internal/avatar"
 	"fight-club/internal/game"
 
 	"github.com/fogleman/gg"
@@ -90,6 +91,14 @@ type StreamManager struct {
 
 	// Callback when stream starts
 	onStreamStart func()
+
+	// Avatar cache for profile pictures
+	avatarCache *avatar.Cache
+
+	// Sound effect tracking - previous frame state
+	prevAttackingPlayers map[string]bool // Track who was attacking last frame
+	prevAlivePlayers     map[string]bool // Track who was alive last frame
+	prevTotalKills       int             // Track total kills last frame
 }
 
 // NewStreamManager creates a new stream manager
@@ -150,7 +159,11 @@ func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
 		workerPool:      workerPool,
 		fastRenderer:    fastRenderer,
 		frameBuffer:     make([]byte, frameSize),
-		frameRingBuffer: frameRingBuffer,
+		frameRingBuffer:      frameRingBuffer,
+		avatarCache:          avatar.NewCache(200), // Cache up to 200 profile pictures
+		prevAttackingPlayers: make(map[string]bool),
+		prevAlivePlayers:     make(map[string]bool),
+		prevTotalKills:       0,
 	}
 
 	// REAL-TIME FIX: Load fonts once at startup (not per-frame)
@@ -495,6 +508,59 @@ func (s *StreamManager) audioLoop() {
 	}
 }
 
+// triggerSoundEffects detects game events and queues appropriate sounds
+func (s *StreamManager) triggerSoundEffects(snap *game.GameSnapshot) {
+	if s.audioMixer == nil {
+		return
+	}
+
+	// Track current state
+	currentAttacking := make(map[string]bool)
+	currentAlive := make(map[string]bool)
+
+	for _, p := range snap.Players {
+		// Track attacking players for swing sound
+		if p.IsAttacking {
+			currentAttacking[p.ID] = true
+			// Play swing sound when player starts attacking
+			if !s.prevAttackingPlayers[p.ID] {
+				s.audioMixer.QueueSound("swing")
+			}
+		}
+
+		// Track alive players for spawn/death sounds
+		if !p.IsDead {
+			currentAlive[p.ID] = true
+			// Player just spawned/respawned
+			if !s.prevAlivePlayers[p.ID] {
+				s.audioMixer.QueueSound("spawn")
+			}
+		}
+	}
+
+	// Check for kills (total kills increased)
+	if snap.TotalKills > s.prevTotalKills {
+		killsThisFrame := snap.TotalKills - s.prevTotalKills
+		// Play kill sound for each kill (max 3 to avoid spam)
+		for i := 0; i < killsThisFrame && i < 3; i++ {
+			s.audioMixer.QueueSound("kill")
+		}
+	}
+
+	// Check for hits - count newly dead players that were alive last frame
+	for id := range s.prevAlivePlayers {
+		if !currentAlive[id] {
+			// Player died this frame - hit sound already played via kill
+			s.audioMixer.QueueSound("hit")
+		}
+	}
+
+	// Update previous state for next frame
+	s.prevAttackingPlayers = currentAttacking
+	s.prevAlivePlayers = currentAlive
+	s.prevTotalKills = snap.TotalKills
+}
+
 func (s *StreamManager) renderAndSendFrame() {
 	frameStart := time.Now()
 
@@ -523,6 +589,9 @@ func (s *StreamManager) renderAndSendFrame() {
 		// No snapshot available yet (engine not started)
 		return
 	}
+
+	// Trigger sound effects based on snapshot changes
+	s.triggerSoundEffects(snapshot)
 
 	// Render to back buffer using snapshot (non-blocking)
 	s.renderFrameFromSnapshot(snapshot, backBuffer, backContext)
@@ -1125,13 +1194,34 @@ func (s *StreamManager) drawPlayerSnapshot(dc *gg.Context, p game.PlayerSnapshot
 		s.drawWeaponAttack(dc, p, anim)
 	}
 
-	// Body
-	dc.SetColor(parseHexColor(p.Color))
-	dc.DrawCircle(p.X, p.Y, radius+3)
-	dc.Fill()
+	// Try to draw profile picture if available
+	avatarDrawn := false
+	if p.ProfilePic != "" && s.avatarCache != nil {
+		if avatarImg := s.avatarCache.GetOrFetch(p.ProfilePic); avatarImg != nil {
+			// Scale and draw the profile picture
+			bounds := avatarImg.Bounds()
+			imgSize := float64(bounds.Dx())
+			scale := (radius * 2) / imgSize
 
-	dc.DrawCircle(p.X, p.Y, radius)
-	dc.Fill()
+			dc.Push()
+			dc.Translate(p.X-radius, p.Y-radius)
+			dc.Scale(scale, scale)
+			dc.DrawImage(avatarImg, 0, 0)
+			dc.Pop()
+			avatarDrawn = true
+		}
+	}
+
+	// Fallback to colored circle if no profile picture
+	if !avatarDrawn {
+		// Body
+		dc.SetColor(parseHexColor(p.Color))
+		dc.DrawCircle(p.X, p.Y, radius+3)
+		dc.Fill()
+
+		dc.DrawCircle(p.X, p.Y, radius)
+		dc.Fill()
+	}
 
 	// Border
 	dc.SetColor(color.White)
@@ -1181,12 +1271,38 @@ func (s *StreamManager) drawRagdollPlayerSnapshot(dc *gg.Context, p game.PlayerS
 	dc.Push()
 	dc.RotateAbout(p.RagdollRotation, p.X, p.Y)
 
-	// Faded body
-	c := parseHexColor(p.Color)
-	c.A = 153
-	dc.SetColor(c)
-	dc.DrawCircle(p.X, p.Y, radius)
-	dc.Fill()
+	// Try to draw faded profile picture if available
+	avatarDrawn := false
+	if p.ProfilePic != "" && s.avatarCache != nil {
+		if avatarImg := s.avatarCache.Get(p.ProfilePic); avatarImg != nil {
+			// Scale and draw the profile picture with transparency
+			bounds := avatarImg.Bounds()
+			imgSize := float64(bounds.Dx())
+			scale := (radius * 2) / imgSize
+
+			// Draw with reduced opacity by using a semi-transparent overlay
+			dc.Translate(p.X-radius, p.Y-radius)
+			dc.Scale(scale, scale)
+			dc.DrawImage(avatarImg, 0, 0)
+			dc.Identity()
+			dc.RotateAbout(p.RagdollRotation, p.X, p.Y)
+
+			// Draw semi-transparent dark overlay to fade the image
+			dc.SetColor(color.RGBA{0, 0, 0, 100})
+			dc.DrawCircle(p.X, p.Y, radius)
+			dc.Fill()
+			avatarDrawn = true
+		}
+	}
+
+	// Fallback to faded colored body
+	if !avatarDrawn {
+		c := parseHexColor(p.Color)
+		c.A = 153
+		dc.SetColor(c)
+		dc.DrawCircle(p.X, p.Y, radius)
+		dc.Fill()
+	}
 
 	// X for dead
 	dc.SetColor(color.RGBA{255, 0, 0, 255})
@@ -1341,24 +1457,24 @@ func (s *StreamManager) drawProjectilesFromSnapshot(dc *gg.Context, projectiles 
 // drawUIFromSnapshot draws the UI using snapshot data
 // Leaderboard is already sorted in the snapshot (moved from render to game tick)
 func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapshot) {
-	// Title - use cached fonts
-	if s.fontsLoaded && s.fontLarge != nil {
-		dc.SetFontFace(s.fontLarge)
-		dc.SetColor(color.RGBA{255, 62, 62, 255})
-		dc.DrawString("THE FIGHT CLUB", 30, 60)
-	} else if err := dc.LoadFontFace(getFontPath(), 48); err == nil {
-		dc.SetColor(color.RGBA{255, 62, 62, 255})
-		dc.DrawString("THE FIGHT CLUB", 30, 60)
-	}
-
-	// Channel name
+	// Call to action - invite viewers to play
 	if s.fontsLoaded && s.fontMedium != nil {
 		dc.SetFontFace(s.fontMedium)
-		dc.SetColor(color.RGBA{255, 107, 107, 255})
-		dc.DrawString("NoRulesIRL", 30, 100)
+		dc.SetColor(color.RGBA{255, 255, 255, 255})
+		dc.DrawString("PLAY NOW! Type !join in chat", 30, 40)
 	} else if err := dc.LoadFontFace(getFontPath(), 24); err == nil {
-		dc.SetColor(color.RGBA{255, 107, 107, 255})
-		dc.DrawString("NoRulesIRL", 30, 100)
+		dc.SetColor(color.RGBA{255, 255, 255, 255})
+		dc.DrawString("PLAY NOW! Type !join in chat", 30, 40)
+	}
+
+	// Subtitle with more commands info
+	if s.fontsLoaded && s.fontSmall != nil {
+		dc.SetFontFace(s.fontSmall)
+		dc.SetColor(color.RGBA{200, 200, 200, 255})
+		dc.DrawString("See description for commands to play with friends!", 30, 70)
+	} else if err := dc.LoadFontFace(getFontPath(), 16); err == nil {
+		dc.SetColor(color.RGBA{200, 200, 200, 255})
+		dc.DrawString("See description for commands to play with friends!", 30, 70)
 	}
 
 	// Leaderboard - players are already sorted in snapshot
@@ -1373,16 +1489,13 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 	}
 
 	x := 30.0
-	y := 140.0
+	y := 100.0
 
-	// Background
+	// No background - removed for cleaner look
 	limit := 10
 	if len(players) < limit {
 		limit = len(players)
 	}
-	dc.SetColor(color.RGBA{0, 0, 0, 178})
-	dc.DrawRectangle(x-10, y-25, 380, float64(limit*36+50))
-	dc.Fill()
 
 	// Header - use cached font
 	if s.fontsLoaded && s.fontSmall != nil {
@@ -1391,8 +1504,8 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 		_ = dc.LoadFontFace(getFontPath(), 20)
 	}
 	dc.SetColor(color.RGBA{83, 255, 69, 255})
-	dc.DrawString("🏆 TOP KILLERS", x, y)
-	y += 40
+	dc.DrawString("TOP KILLERS", x, y)
+	y += 30
 
 	// Players - already sorted in snapshot
 	for i := 0; i < limit; i++ {
