@@ -255,8 +255,7 @@ func (s *StreamManager) Start() error {
 	log.Println("   🎥 Using libx264 CPU encoding")
 
 	// Build FFmpeg arguments
-	// CROSS-PLATFORM FIX: Use FFmpeg's native file input with -stream_loop -1
-	// instead of ExtraFiles (which doesn't work on Windows)
+	// Audio is piped from Go audio mixer (handles music + SFX together)
 	args := []string{
 		"-y",
 		// Video input (pipe:0 - stdin)
@@ -265,35 +264,18 @@ func (s *StreamManager) Start() error {
 		"-s", fmt.Sprintf("%dx%d", s.config.Width, s.config.Height),
 		"-r", fmt.Sprintf("%d", s.config.FPS),
 		"-i", "pipe:0",
+		// Audio input (pipe:3 - extra file)
+		"-f", "s16le",
+		"-ar", "44100",
+		"-ac", "2",
+		"-i", "pipe:3",
 	}
 
-	// Add audio source based on configuration
-	musicPath := s.config.MusicPath
-	musicFileExists := false
-	if s.config.MusicEnabled && musicPath != "" {
-		if _, err := os.Stat(musicPath); err == nil {
-			musicFileExists = true
-		}
+	// Log audio configuration
+	if s.config.MusicEnabled && s.config.MusicPath != "" {
+		log.Printf("   🎵 Background music: %s (volume: %.0f%%)", s.config.MusicPath, s.config.MusicVolume*100)
 	}
-
-	if musicFileExists {
-		// Use music file with infinite loop
-		// -stream_loop -1 means infinite loop, volume filter for background level
-		log.Printf("   🎵 Background music: %s (volume: %.0f%%)", musicPath, s.config.MusicVolume*100)
-		args = append(args,
-			"-stream_loop", "-1", // Infinite loop
-			"-i", musicPath,
-		)
-	} else {
-		// Fallback to silent audio
-		if s.config.MusicEnabled && musicPath != "" {
-			log.Printf("   ⚠️ Music file not found: %s, using silent audio", musicPath)
-		}
-		args = append(args,
-			"-f", "lavfi",
-			"-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-		)
-	}
+	log.Println("   🔊 Sound effects: enabled (piped from Go audio mixer)")
 
 	// Video encoding - optimized for speed
 	args = append(args,
@@ -310,30 +292,18 @@ func (s *StreamManager) Start() error {
 		"-profile:v", "main",
 	)
 
-	// Audio encoding with volume filter if music is enabled
-	if musicFileExists {
-		// Apply volume filter for background level
-		args = append(args,
-			"-af", fmt.Sprintf("volume=%.2f", s.config.MusicVolume),
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ar", "44100",
-			"-ac", "2",
-		)
-	} else {
-		args = append(args,
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ar", "44100",
-			"-ac", "2",
-		)
-	}
+	// Audio encoding (piped from Go audio mixer)
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-ar", "44100",
+		"-ac", "2",
+	)
 
 	// Map streams and output
 	args = append(args,
-		"-map", "0:v", // Video from stdin
-		"-map", "1:a", // Audio from file or anullsrc
-		// NOTE: Do NOT use -shortest with -stream_loop -1, it causes filter graph conflict
+		"-map", "0:v", // Video from stdin (pipe:0)
+		"-map", "1:a", // Audio from pipe:3
 		"-f", "flv",
 		rtmpURL,
 	)
@@ -351,6 +321,14 @@ func (s *StreamManager) Start() error {
 		return fmt.Errorf("failed to create video pipe: %w", err)
 	}
 
+	// Create audio pipe (fd 3 via ExtraFiles)
+	audioReader, audioWriter, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create audio pipe: %w", err)
+	}
+	s.audioPipe = audioWriter
+	s.ffmpeg.ExtraFiles = []*os.File{audioReader} // fd 3
+
 	// Capture stderr for debugging
 	s.ffmpeg.Stderr = os.Stderr
 
@@ -367,6 +345,9 @@ func (s *StreamManager) Start() error {
 
 	// Start frame loop (video)
 	go s.frameLoop()
+
+	// Start audio loop (sound effects + music)
+	go s.audioLoop()
 
 	log.Println("✅ Stream started!")
 
@@ -1472,27 +1453,54 @@ func (s *StreamManager) drawProjectilesFromSnapshot(dc *gg.Context, projectiles 
 // drawUIFromSnapshot draws the UI using snapshot data
 // Leaderboard is already sorted in the snapshot (moved from render to game tick)
 func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapshot) {
-	// Call to action - invite viewers to play
-	if s.fontsLoaded && s.fontMedium != nil {
-		dc.SetFontFace(s.fontMedium)
-		dc.SetColor(color.RGBA{255, 255, 255, 255})
-		dc.DrawString("PLAY NOW! Type !join in chat", 30, 40)
-	} else if err := dc.LoadFontFace(getFontPath(), 24); err == nil {
-		dc.SetColor(color.RGBA{255, 255, 255, 255})
-		dc.DrawString("PLAY NOW! Type !join in chat", 30, 40)
+	// === ENGAGING CALL TO ACTION BANNER ===
+	// Draw gradient-like banner background
+	dc.SetColor(color.RGBA{0, 150, 255, 200}) // Kick blue
+	dc.DrawRoundedRectangle(15, 10, 400, 75, 10)
+	dc.Fill()
+
+	// Inner glow effect
+	dc.SetColor(color.RGBA{50, 200, 255, 150})
+	dc.DrawRoundedRectangle(20, 15, 390, 65, 8)
+	dc.Fill()
+
+	// Main title - "PLAY NOW!" with shadow
+	if s.fontsLoaded && s.fontLarge != nil {
+		dc.SetFontFace(s.fontLarge)
+	} else {
+		_ = dc.LoadFontFace(getFontPath(), 36)
 	}
 
-	// Subtitle with more commands info
+	// Text shadow
+	dc.SetColor(color.RGBA{0, 0, 0, 180})
+	dc.DrawString("PLAY NOW!", 32, 55)
+
+	// Main text with bright color
+	dc.SetColor(color.RGBA{255, 255, 100, 255}) // Yellow/gold
+	dc.DrawString("PLAY NOW!", 30, 53)
+
+	// Subtitle - command hint
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
-		dc.SetColor(color.RGBA{200, 200, 200, 255})
-		dc.DrawString("See description for commands to play with friends!", 30, 70)
-	} else if err := dc.LoadFontFace(getFontPath(), 16); err == nil {
-		dc.SetColor(color.RGBA{200, 200, 200, 255})
-		dc.DrawString("See description for commands to play with friends!", 30, 70)
+	} else {
+		_ = dc.LoadFontFace(getFontPath(), 16)
 	}
+	dc.SetColor(color.RGBA{255, 255, 255, 255})
+	dc.DrawString("Type !join in chat to fight!", 30, 75)
 
-	// Leaderboard - players are already sorted in snapshot
+	// === PLAYER COUNT BADGE (right side) ===
+	aliveText := fmt.Sprintf("%d FIGHTING", snap.AliveCount)
+	dc.SetColor(color.RGBA{255, 62, 62, 200}) // Red badge
+	dc.DrawRoundedRectangle(float64(s.config.Width)-150, 10, 135, 35, 8)
+	dc.Fill()
+
+	if s.fontsLoaded && s.fontSmall != nil {
+		dc.SetFontFace(s.fontSmall)
+	}
+	dc.SetColor(color.RGBA{255, 255, 255, 255})
+	dc.DrawString(aliveText, float64(s.config.Width)-140, 33)
+
+	// === LEADERBOARD ===
 	s.drawLeaderboardFromSnapshot(dc, snap.Players)
 }
 
@@ -1504,47 +1512,58 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 	}
 
 	x := 30.0
-	y := 100.0
+	y := 105.0 // Moved down to account for banner
 
-	// No background - removed for cleaner look
-	limit := 10
+	limit := 8 // Show top 8 for cleaner look
 	if len(players) < limit {
 		limit = len(players)
 	}
 
-	// Header - use cached font
+	// Semi-transparent background for leaderboard
+	bgHeight := float64(limit*28 + 40)
+	dc.SetColor(color.RGBA{0, 0, 0, 150})
+	dc.DrawRoundedRectangle(x-10, y-25, 280, bgHeight, 8)
+	dc.Fill()
+
+	// Header with icon
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	} else {
-		_ = dc.LoadFontFace(getFontPath(), 20)
+		_ = dc.LoadFontFace(getFontPath(), 18)
 	}
-	dc.SetColor(color.RGBA{83, 255, 69, 255})
-	dc.DrawString("TOP KILLERS", x, y)
-	y += 30
+	dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
+	dc.DrawString("🏆 TOP KILLERS", x, y)
+	y += 28
 
 	// Players - already sorted in snapshot
 	for i := 0; i < limit; i++ {
 		p := players[i]
 
-		// Color based on rank
-		if i == 0 {
-			dc.SetColor(color.RGBA{255, 215, 0, 255})
-		} else if i == 1 {
-			dc.SetColor(color.RGBA{192, 192, 192, 255})
-		} else if i == 2 {
-			dc.SetColor(color.RGBA{205, 127, 50, 255})
-		} else {
-			dc.SetColor(color.White)
+		// Medal/rank indicator and color
+		var rankIcon string
+		switch i {
+		case 0:
+			dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
+			rankIcon = "🥇"
+		case 1:
+			dc.SetColor(color.RGBA{192, 192, 192, 255}) // Silver
+			rankIcon = "🥈"
+		case 2:
+			dc.SetColor(color.RGBA{205, 127, 50, 255}) // Bronze
+			rankIcon = "🥉"
+		default:
+			dc.SetColor(color.RGBA{200, 200, 200, 255}) // Gray
+			rankIcon = fmt.Sprintf("%d.", i+1)
 		}
 
-		status := "⚔️"
+		status := ""
 		if p.IsDead {
-			status = "💀"
+			status = " 💀"
 		}
 
-		text := fmt.Sprintf("%d. %s %s: %d kills", i+1, status, p.Name, p.Kills)
+		text := fmt.Sprintf("%s %s%s: %d", rankIcon, p.Name, status, p.Kills)
 		dc.DrawString(text, x, y)
-		y += 32
+		y += 28
 	}
 }
 

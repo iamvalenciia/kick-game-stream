@@ -208,6 +208,7 @@ func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.Spatial
 }
 
 // findTarget uses spatial grid for O(k) neighbor lookup instead of O(n) scan
+// When no nearby target is found, falls back to global search for exploration
 func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.SpatialGrid) {
 	// Priority 1: Focus target (if valid and alive)
 	// This still needs full scan since focus target can be anywhere
@@ -234,9 +235,9 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 	var closest *Player
 	minDist := math.MaxFloat64
 
-	// Query only nearby entities within detection range
-	const detectionRange = 500.0
-	candidates := grid.QueryRadius(p.X, p.Y, detectionRange)
+	// First try nearby detection range for immediate combat
+	const combatRange = 300.0 // Immediate combat detection
+	candidates := grid.QueryRadius(p.X, p.Y, combatRange)
 
 	for _, idx := range candidates {
 		if idx == selfIdx {
@@ -252,9 +253,33 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 		}
 
 		dist := p.distanceTo(other)
-		if dist < minDist && dist < detectionRange {
+		if dist < minDist {
 			minDist = dist
 			closest = other
+		}
+	}
+
+	// If no nearby target found, do GLOBAL search for exploration
+	// This ensures players always find someone to fight
+	if closest == nil {
+		minDist = math.MaxFloat64
+		for i, other := range players {
+			if uint32(i) == selfIdx {
+				continue
+			}
+			if other.IsDead || other.IsRagdoll || other.SpawnProtection {
+				continue
+			}
+			// Skip teammates
+			if p.TeamID != "" && p.TeamID == other.TeamID {
+				continue
+			}
+
+			dist := p.distanceTo(other)
+			if dist < minDist {
+				minDist = dist
+				closest = other
+			}
 		}
 	}
 
@@ -262,7 +287,7 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 }
 
 // combatBehavior handles all combat AI - approaching, attacking, retreating
-// Uses FlowField for intelligent navigation when approaching from distance.
+// OPTIMIZED: Direct approach for fast combat engagement, flow fields only for long distance
 func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 	if p.Target == nil {
 		return
@@ -282,68 +307,64 @@ func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 	// Decide action based on distance and cooldown
 	attackRange := weapon.Range
 
+	// IMMEDIATE ATTACK: In range and ready
 	if dist <= attackRange && p.AttackCooldown <= 0 && !p.Target.SpawnProtection && !p.SpawnProtection {
-		// In range and ready to attack - ATTACK!
 		p.attack(engine)
-
 		// Small backwards movement after attack
 		p.VX -= dx * 1.5
 		p.VY -= dy * 1.5
+		p.AttackAngle = math.Atan2(dy, dx)
+		return
+	}
 
-	} else if dist > attackRange {
-		// Too far - approach using FlowField if available (O(1) lookup)
-		moveSpeed := 4.0 * p.Aggression
+	// APPROACH TARGET - always move toward enemy aggressively
+	if dist > attackRange*0.6 {
+		// Calculate move speed based on distance and aggression
+		moveSpeed := 5.0 * p.Aggression // Increased from 4.0
 
-		// Use FlowField for navigation when approaching from distance
-		// This gives smarter pathfinding than simple line-of-sight
-		if flowMgr := engine.GetFlowFieldManager(); flowMgr != nil && dist > attackRange*2 {
-			// Generate/retrieve flow field toward target
-			// Use target position as key (coarse, regenerate if target moves significantly)
-			goalKey := p.Target.ID
-			field := flowMgr.GetOrCreate(goalKey, p.Target.X, p.Target.Y)
+		// Very far away (>400px) - use flow fields for smart navigation
+		if dist > 400 {
+			if flowMgr := engine.GetFlowFieldManager(); flowMgr != nil {
+				goalKey := p.Target.ID
+				field := flowMgr.GetOrCreate(goalKey, p.Target.X, p.Target.Y)
+				flowX, flowY := field.Lookup(p.X, p.Y)
 
-			// Get flow direction at current position
-			flowX, flowY := field.Lookup(p.X, p.Y)
-
-			// Blend flow direction with direct approach (70% flow, 30% direct for responsiveness)
-			if flowX != 0 || flowY != 0 {
-				blendedDX := float64(flowX)*0.7 + dx*0.3
-				blendedDY := float64(flowY)*0.7 + dy*0.3
-
-				// Normalize blended direction
-				length := math.Sqrt(blendedDX*blendedDX + blendedDY*blendedDY)
-				if length > 0 {
-					blendedDX /= length
-					blendedDY /= length
+				if flowX != 0 || flowY != 0 {
+					// Use flow direction but stay responsive
+					blendedDX := float64(flowX)*0.5 + dx*0.5
+					blendedDY := float64(flowY)*0.5 + dy*0.5
+					length := math.Sqrt(blendedDX*blendedDX + blendedDY*blendedDY)
+					if length > 0 {
+						blendedDX /= length
+						blendedDY /= length
+					}
+					p.VX += blendedDX * moveSpeed * deltaTime * 60
+					p.VY += blendedDY * moveSpeed * deltaTime * 60
+				} else {
+					// Direct approach
+					p.VX += dx * moveSpeed * deltaTime * 60
+					p.VY += dy * moveSpeed * deltaTime * 60
 				}
-
-				p.VX += blendedDX * moveSpeed * deltaTime * 60
-				p.VY += blendedDY * moveSpeed * deltaTime * 60
 			} else {
-				// No flow field data, use direct approach
+				// Direct approach
 				p.VX += dx * moveSpeed * deltaTime * 60
 				p.VY += dy * moveSpeed * deltaTime * 60
 			}
 		} else {
-			// Close enough to use direct approach
+			// Close-mid range: DIRECT aggressive approach (no flow field delay)
 			p.VX += dx * moveSpeed * deltaTime * 60
 			p.VY += dy * moveSpeed * deltaTime * 60
 		}
-
 	} else if dist < attackRange*0.4 {
-		// Too close - strafe sideways while waiting for cooldown
-		// This prevents the circling by adding perpendicular movement
+		// TOO CLOSE - strafe while waiting for cooldown
 		perpX := -dy
 		perpY := dx
-
-		// Add slight randomness to strafe direction
 		if rand.Float64() < 0.5 {
 			perpX = dy
 			perpY = -dx
 		}
-
-		p.VX += perpX * 2.0 * deltaTime * 60
-		p.VY += perpY * 2.0 * deltaTime * 60
+		p.VX += perpX * 2.5 * deltaTime * 60
+		p.VY += perpY * 2.5 * deltaTime * 60
 	}
 
 	// Always face target
