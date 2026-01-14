@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"fight-club/internal/avatar"
@@ -339,6 +340,9 @@ func (s *StreamManager) Start() error {
 
 	s.ffmpeg = exec.Command("ffmpeg", args...)
 
+	// Set process group so we can kill all child processes together
+	s.ffmpeg.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	// Create video pipe (stdin = fd 0)
 	var err error
 	s.videoPipe, err = s.ffmpeg.StdinPipe()
@@ -387,12 +391,22 @@ func (s *StreamManager) Stop() {
 	s.streaming = false
 	close(s.stopChan)
 
+	// Stop async writer first (before closing pipes)
+	if s.asyncWriter != nil {
+		s.asyncWriter.Stop()
+	}
+
 	// Stop worker pool
 	if s.workerPool != nil {
 		s.workerPool.Stop()
 	}
 
-	// Close pipes first to unblock any reads
+	// Stop audio mixer/music player
+	if s.audioMixer != nil && s.audioMixer.musicPlayer != nil {
+		s.audioMixer.musicPlayer.Close()
+	}
+
+	// Close pipes to unblock any reads
 	if s.videoPipe != nil {
 		s.videoPipe.Close()
 	}
@@ -400,16 +414,15 @@ func (s *StreamManager) Stop() {
 		s.audioPipe.Close()
 	}
 
-	// Kill FFmpeg process
+	// Kill FFmpeg process and all its children
 	if s.ffmpeg != nil && s.ffmpeg.Process != nil {
-		// Try graceful signal first? Windows doesn't really support SIGINT well for this.
-		// Just kill it to be sure.
-		if err := s.ffmpeg.Process.Kill(); err != nil {
-			log.Printf("⚠️ Failed to kill FFmpeg: %v", err)
-		}
+		pid := s.ffmpeg.Process.Pid
+		log.Printf("🔪 Killing FFmpeg process (PID: %d)...", pid)
 
-		// Wait for process to exit to avoid zombies and insure it's dead
-		// We use a channel to handle the wait with potential timeout/non-blocking
+		// First try SIGTERM for graceful shutdown
+		s.ffmpeg.Process.Signal(syscall.SIGTERM)
+
+		// Wait briefly for graceful exit
 		done := make(chan error, 1)
 		go func() {
 			done <- s.ffmpeg.Wait()
@@ -417,9 +430,21 @@ func (s *StreamManager) Stop() {
 
 		select {
 		case <-done:
-			log.Println("✅ FFmpeg process terminated")
-		case <-time.After(2 * time.Second):
-			log.Println("⚠️ Timed out waiting for FFmpeg to terminate")
+			log.Println("✅ FFmpeg process terminated gracefully")
+		case <-time.After(1 * time.Second):
+			// Force kill if still running
+			log.Println("⚠️ FFmpeg didn't stop gracefully, force killing...")
+			s.ffmpeg.Process.Kill()
+
+			// Also try to kill the process group (kills all child processes)
+			syscall.Kill(-pid, syscall.SIGKILL)
+
+			select {
+			case <-done:
+				log.Println("✅ FFmpeg process force killed")
+			case <-time.After(2 * time.Second):
+				log.Println("⚠️ Timed out waiting for FFmpeg to terminate")
+			}
 		}
 	}
 
