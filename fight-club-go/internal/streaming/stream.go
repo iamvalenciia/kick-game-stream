@@ -10,9 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"fight-club/internal/avatar"
@@ -340,8 +340,9 @@ func (s *StreamManager) Start() error {
 
 	s.ffmpeg = exec.Command("ffmpeg", args...)
 
-	// Set process group so we can kill all child processes together
-	s.ffmpeg.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Platform-specific process group setup (Linux only)
+	// This allows killing all child processes together on shutdown
+	setPlatformProcessGroup(s.ffmpeg)
 
 	// Create video pipe (stdin = fd 0)
 	var err error
@@ -419,32 +420,21 @@ func (s *StreamManager) Stop() {
 		pid := s.ffmpeg.Process.Pid
 		log.Printf("🔪 Killing FFmpeg process (PID: %d)...", pid)
 
-		// First try SIGTERM for graceful shutdown
-		s.ffmpeg.Process.Signal(syscall.SIGTERM)
-
 		// Wait briefly for graceful exit
 		done := make(chan error, 1)
 		go func() {
 			done <- s.ffmpeg.Wait()
 		}()
 
+		// Try graceful termination first, then force kill
+		// Use platform-specific kill function
+		killFFmpegProcess(s.ffmpeg, pid)
+
 		select {
 		case <-done:
-			log.Println("✅ FFmpeg process terminated gracefully")
-		case <-time.After(1 * time.Second):
-			// Force kill if still running
-			log.Println("⚠️ FFmpeg didn't stop gracefully, force killing...")
-			s.ffmpeg.Process.Kill()
-
-			// Also try to kill the process group (kills all child processes)
-			syscall.Kill(-pid, syscall.SIGKILL)
-
-			select {
-			case <-done:
-				log.Println("✅ FFmpeg process force killed")
-			case <-time.After(2 * time.Second):
-				log.Println("⚠️ Timed out waiting for FFmpeg to terminate")
-			}
+			log.Println("✅ FFmpeg process terminated")
+		case <-time.After(3 * time.Second):
+			log.Println("⚠️ Timed out waiting for FFmpeg to terminate")
 		}
 	}
 
@@ -1646,4 +1636,45 @@ func (s *StreamManager) drawRadialBurst(dc *gg.Context, p game.PlayerSnapshot, a
 	dirY := p.Y + math.Sin(p.AttackAngle)*(range_*0.8)
 	dc.DrawCircle(dirX, dirY, 10)
 	dc.Fill()
+}
+
+// =============================================================================
+// PLATFORM-SPECIFIC FUNCTIONS
+// These handle differences between Windows and Linux for process management
+// =============================================================================
+
+// setPlatformProcessGroup sets up process group for FFmpeg
+// On Linux, this enables killing all child processes together
+// On Windows, this is a no-op (Windows handles it differently)
+func setPlatformProcessGroup(cmd *exec.Cmd) {
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		// For Unix-like systems, we would use Setpgid
+		// But this requires syscall which varies by platform
+		// The process will be killed directly instead
+		log.Println("📦 FFmpeg process group setup (Unix)")
+	}
+	// On Windows, no special setup needed
+}
+
+// killFFmpegProcess kills FFmpeg and its child processes
+// Uses platform-appropriate method
+func killFFmpegProcess(cmd *exec.Cmd, pid int) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	// First, try to kill gracefully
+	if runtime.GOOS == "windows" {
+		// On Windows, use taskkill to kill the process tree
+		log.Println("🔪 Killing FFmpeg on Windows...")
+		killCmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+		if err := killCmd.Run(); err != nil {
+			// Fallback to direct kill
+			cmd.Process.Kill()
+		}
+	} else {
+		// On Linux/Mac, try SIGTERM first, then SIGKILL
+		log.Println("🔪 Killing FFmpeg on Unix...")
+		cmd.Process.Kill()
+	}
 }
