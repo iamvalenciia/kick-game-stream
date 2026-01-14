@@ -3,12 +3,15 @@ package avatar
 import (
 	"image"
 	"image/draw"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/gif"  // Support GIF format
+	_ "image/jpeg" // Support JPEG format
+	_ "image/png"  // Support PNG format
 	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	_ "golang.org/x/image/webp" // Support WebP format (Kick profile pictures)
 )
 
 // Cache stores decoded avatar images with LRU eviction
@@ -126,11 +129,13 @@ func (c *Cache) fetchAsync(url string) {
 		return
 	}
 
-	img, _, err := image.Decode(resp.Body)
+	img, format, err := image.Decode(resp.Body)
 	if err != nil {
-		log.Printf("⚠️ Avatar decode failed: %v", err)
+		log.Printf("⚠️ Avatar decode failed for %s: %v (Content-Type: %s)",
+			url[:min(60, len(url))], err, resp.Header.Get("Content-Type"))
 		return
 	}
+	log.Printf("🖼️ Avatar decoded (format: %s) for %s", format, url[:min(40, len(url))])
 
 	// Make circular
 	circleImg := c.makeCircular(img)
