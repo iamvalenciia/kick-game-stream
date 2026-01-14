@@ -2,8 +2,6 @@ module fight-club
 
 go 1.24.0
 
-toolchain go1.24.11
-
 require (
 	github.com/fogleman/gg v1.3.0
 	github.com/go-chi/chi/v5 v5.2.3

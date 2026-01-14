@@ -100,14 +100,39 @@ func (b *Bot) dispatcher() {
 	}
 }
 
+// getWeaponEmoji returns an emoji for the weapon type
+func getWeaponEmoji(weapon string) string {
+	weaponLower := strings.ToLower(weapon)
+	switch weaponLower {
+	case "sword":
+		return "🗡️"
+	case "spear":
+		return "🔱"
+	case "axe":
+		return "🪓"
+	case "bow":
+		return "🏹"
+	case "scythe":
+		return "⚔️"
+	case "hammer":
+		return "🔨"
+	case "fists", "fist":
+		return "👊"
+	default:
+		return "⚔️"
+	}
+}
+
 // processEvent handles the actual sending and error recovery
 func (b *Bot) processEvent(event KillEvent) {
-	// 1. Format Message
-	msg := fmt.Sprintf("%s eliminated %s with %s ⚔️", event.Killer, event.Victim, event.Weapon)
+	// 1. Format Message with weapon emoji
+	weaponEmoji := getWeaponEmoji(event.Weapon)
+	msg := fmt.Sprintf("%s %s eliminated %s", weaponEmoji, event.Killer, event.Victim)
 
-	// 2. Send Message (using Broadcaster ID which is already configured)
-	// We use SendMessage which aligns with public/v1/chat documentation (requiring broadcaster_user_id)
-	// We DO NOT need chatroom_id for this endpoint.
+	// 2. Send Message as the streamer (type: "user")
+	// Using SendMessage which uses type: "user" with broadcaster_user_id
+	// The message appears as coming from the streamer's account
+	log.Printf("🎮 Kill event: %s -> %s (weapon: %s)", event.Killer, event.Victim, event.Weapon)
 	err := b.service.SendMessage(msg)
 
 	// 3. Handle Errors
