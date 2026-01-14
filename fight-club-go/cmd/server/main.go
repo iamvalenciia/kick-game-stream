@@ -135,12 +135,22 @@ func main() {
 		// Register chat message handler
 		kickService.OnChatMessage(func(msg kick.ChatMessage) {
 			if msg.IsCommand {
+				profilePic := msg.ProfilePic
+
+				// If profile picture is not in webhook, fetch from API
+				if profilePic == "" && msg.UserID != 0 {
+					if pic, err := kickService.GetUserProfilePicture(msg.UserID); err == nil && pic != "" {
+						profilePic = pic
+						log.Printf("📷 Fetched profile picture for %s: %s", msg.Username, pic[:min(50, len(pic))])
+					}
+				}
+
 				cmd := chat.ChatCommand{
 					Command:    msg.Command,
 					Args:       msg.Args,
 					Username:   msg.Username,
 					UserID:     msg.UserID,
-					ProfilePic: msg.ProfilePic,
+					ProfilePic: profilePic,
 				}
 				chatHandler.ProcessCommand(cmd)
 			}

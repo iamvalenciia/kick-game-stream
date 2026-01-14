@@ -379,6 +379,33 @@ func (s *Service) getUserInfo() error {
 	return nil
 }
 
+// GetUserProfilePicture fetches a user's profile picture URL by their user ID
+func (s *Service) GetUserProfilePicture(userID int64) (string, error) {
+	endpoint := fmt.Sprintf("/users?id=%d", userID)
+	resp, err := s.apiRequest("GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Data []struct {
+			UserID         int64  `json:"user_id"`
+			Name           string `json:"name"`
+			ProfilePicture string `json:"profile_picture"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return "", err
+	}
+
+	if len(result.Data) > 0 && result.Data[0].ProfilePicture != "" {
+		return result.Data[0].ProfilePicture, nil
+	}
+
+	return "", nil
+}
+
 // apiRequest makes an authenticated API request
 func (s *Service) apiRequest(method, endpoint string, body interface{}) ([]byte, error) {
 	s.mu.RLock()
@@ -544,7 +571,13 @@ func (s *Service) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Printf("💬 [%s]: %s", msg.Username, msg.Content)
+		// Debug logging
+		if msg.IsCommand {
+			log.Printf("💬 [%s] COMMAND: !%s (UserID: %d, ProfilePic: %v)",
+				msg.Username, msg.Command, msg.UserID, msg.ProfilePic != "")
+		} else {
+			log.Printf("💬 [%s]: %s", msg.Username, msg.Content)
+		}
 
 		// Call handler
 		s.mu.RLock()
