@@ -129,11 +129,11 @@ func (b *Bot) processEvent(event KillEvent) {
 	weaponEmoji := getWeaponEmoji(event.Weapon)
 	msg := fmt.Sprintf("%s %s eliminated %s", weaponEmoji, event.Killer, event.Victim)
 
-	// 2. Send Message as the streamer (type: "user")
-	// Using SendMessage which uses type: "user" with broadcaster_user_id
-	// The message appears as coming from the streamer's account
+	// 2. Send Message as BOT (type: "bot")
+	// Using SendBotMessage - this automatically sends to the channel associated
+	// with the OAuth token, avoiding broadcaster_user_id mismatch issues
 	log.Printf("🎮 Kill event: %s -> %s (weapon: %s)", event.Killer, event.Victim, event.Weapon)
-	err := b.service.SendMessage(msg)
+	err := b.service.SendBotMessage(msg)
 
 	// 3. Handle Errors
 	if err != nil {
