@@ -107,7 +107,7 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 		})
 	})
 
-	// Test endpoint to send a message to chat
+	// Test endpoint to send a USER message to chat
 	mux.HandleFunc("/test-message", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -127,7 +127,7 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 			req.Message = "🎮 Test message from Fight Club!"
 		}
 
-		log.Printf("🧪 Test message requested: %s", req.Message)
+		log.Printf("🧪 Test USER message requested: %s", req.Message)
 
 		if err := s.SendMessage(req.Message); err != nil {
 			log.Printf("❌ Test message failed: %v", err)
@@ -139,6 +139,43 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"message": req.Message,
+			"type":    "user",
+		})
+	})
+
+	// Test endpoint to send a BOT message to chat (for kill feed)
+	mux.HandleFunc("/test-bot-message", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Message string `json:"message"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if req.Message == "" {
+			req.Message = "🗡️ TestKiller eliminated TestVictim"
+		}
+
+		log.Printf("🧪 Test BOT message requested: %s", req.Message)
+
+		if err := s.SendBotMessage(req.Message); err != nil {
+			log.Printf("❌ Test bot message failed: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to send: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": req.Message,
+			"type":    "bot",
 		})
 	})
 
@@ -181,5 +218,7 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 	log.Printf("   - OAuth: http://localhost:%d/api/kick/auth", localPort)
 	log.Printf("   - Callback: %s (Auto: %s)", callbackURL, baseURL)
 	log.Printf("   - Webhook: %s/api/kick/webhook (tunnel required)", baseURL)
+	log.Printf("   - Test User Message: POST %s/api/kick/test-message", baseURL)
+	log.Printf("   - Test Bot Message: POST %s/api/kick/test-bot-message", baseURL)
 	log.Printf("   - Update Category: POST %s/api/kick/update-category", baseURL)
 }

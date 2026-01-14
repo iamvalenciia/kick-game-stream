@@ -672,20 +672,16 @@ func (s *Service) SendMessage(content string) error {
 }
 
 func (s *Service) SendBotMessage(content string) error {
-	s.mu.RLock()
-	broadcasterID := s.broadcasterID
-	s.mu.RUnlock()
+	// For bot messages, broadcaster_user_id is NOT required per Kick API docs:
+	// "When sending as a bot, the broadcaster_user_id is not required and is ignored.
+	// As a bot, the message will always be sent to the channel attached to your token."
 
-	if broadcasterID == 0 {
-		return errors.New("broadcaster ID not set")
-	}
+	log.Printf("🤖 Sending BOT message: %s", content)
 
-	log.Printf("🤖 Sending BOT message (broadcaster: %d): %s", broadcasterID, content)
-
+	// Bot type messages only need content and type
 	body := map[string]interface{}{
-		"content":             content,
-		"type":                "bot",
-		"broadcaster_user_id": broadcasterID,
+		"content": content,
+		"type":    "bot",
 	}
 
 	endpoint := "/chat"
