@@ -10,9 +10,10 @@ import (
 
 // KillEvent represents a single kill to be broadcast
 type KillEvent struct {
-	Killer string
-	Victim string
-	Weapon string
+	Killer      string
+	Victim      string
+	Weapon      string
+	KillerKills int
 }
 
 // Bot handles the high-level logic for the Kick Kill-Feed Bot
@@ -58,11 +59,12 @@ func (b *Bot) Stop() {
 
 // QueueKill attempts to queue a kill event.
 // Non-blocking: if queue is full, the event is intentionally DROPPED (Drop Newest policy).
-func (b *Bot) QueueKill(killer, victim, weapon string) {
+func (b *Bot) QueueKill(killer, victim, weapon string, killerKills int) {
 	event := KillEvent{
-		Killer: killer,
-		Victim: victim,
-		Weapon: weapon,
+		Killer:      killer,
+		Victim:      victim,
+		Weapon:      weapon,
+		KillerKills: killerKills,
 	}
 
 	select {
@@ -125,9 +127,9 @@ func getWeaponEmoji(weapon string) string {
 
 // processEvent handles the actual sending and error recovery
 func (b *Bot) processEvent(event KillEvent) {
-	// 1. Format Message with weapon emoji
+	// 1. Format Message with weapon emoji and kill count
 	weaponEmoji := getWeaponEmoji(event.Weapon)
-	msg := fmt.Sprintf("%s %s eliminated %s", weaponEmoji, event.Killer, event.Victim)
+	msg := fmt.Sprintf("%s %s eliminated %s (%d kills)", weaponEmoji, event.Killer, event.Victim, event.KillerKills)
 
 	// 2. Send Message as USER (type: "user")
 	// Using SendMessage with broadcaster_user_id - this sends as the streamer account

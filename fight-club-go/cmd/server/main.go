@@ -152,7 +152,7 @@ func main() {
 		kickBot.Start()
 
 		engine.OnKill = func(killer, victim *game.Player) {
-			kickBot.QueueKill(killer.Name, victim.Name, killer.Weapon)
+			kickBot.QueueKill(killer.Name, victim.Name, killer.Weapon, killer.Kills)
 		}
 
 		log.Println("✅ Kick OAuth service initialized")

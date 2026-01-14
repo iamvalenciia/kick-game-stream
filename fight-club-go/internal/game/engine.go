@@ -78,6 +78,11 @@ type Engine struct {
 
 	// Team management
 	teamManager *TeamManager
+
+	// Arena bot system - always keeps at least one bot in the arena
+	arenaBotEnabled     bool
+	arenaBotRespawnTime float64 // Time until arena bot respawns (seconds)
+	arenaBotName        string
 }
 
 // NewEngine creates a new game engine with DoS-resilient defaults
@@ -112,6 +117,8 @@ func NewEngine(tickRate int) *Engine {
 		rng:              rand.New(rand.NewSource(seed)),
 		rngSeed:          seed,
 		teamManager:      NewTeamManager(),
+		arenaBotEnabled:  true,
+		arenaBotName:     "Arena-Bot",
 	}
 }
 
@@ -230,6 +237,9 @@ func (e *Engine) tick() {
 	e.updateShake()
 	e.updateProjectiles()
 	e.shakeThisTick = 0 // Reset shake rate limiter
+
+	// Update arena bot (respawn if dead)
+	e.updateArenaBot(deltaTime)
 
 	// Produce immutable snapshot for lock-free render access
 	e.ProduceSnapshot()
@@ -1083,4 +1093,57 @@ func (e *Engine) SetPlayerTeam(playerName, teamID string) {
 	if player, ok := e.players[playerName]; ok {
 		player.TeamID = teamID
 	}
+}
+
+// updateArenaBot manages the arena bot that always exists in the game
+// If the bot is dead, it will respawn after 10 seconds
+func (e *Engine) updateArenaBot(deltaTime float64) {
+	if !e.arenaBotEnabled {
+		return
+	}
+
+	bot, exists := e.players[e.arenaBotName]
+
+	if !exists {
+		// Spawn the arena bot for the first time
+		e.spawnArenaBot()
+		return
+	}
+
+	if bot.IsDead {
+		// Bot is dead, count down respawn timer
+		if e.arenaBotRespawnTime <= 0 {
+			// Start 10 second respawn countdown
+			e.arenaBotRespawnTime = 10.0
+			log.Printf("🤖 Arena bot died! Respawning in 10 seconds...")
+		}
+
+		e.arenaBotRespawnTime -= deltaTime
+		if e.arenaBotRespawnTime <= 0 {
+			// Respawn the bot
+			bot.Respawn()
+			e.arenaBotRespawnTime = 0
+			log.Printf("🤖 Arena bot respawned!")
+		}
+	}
+}
+
+// spawnArenaBot creates the permanent arena bot
+func (e *Engine) spawnArenaBot() {
+	bot := NewPlayer(e.arenaBotName, PlayerOptions{
+		Color: "#ff0000", // Red color for the arena bot
+	})
+	bot.X = e.rng.Float64()*e.worldWidth*0.8 + e.worldWidth*0.1
+	bot.Y = e.rng.Float64()*e.worldHeight*0.8 + e.worldHeight*0.1
+	bot.Aggression = 1.0 // Maximum aggression
+
+	e.players[e.arenaBotName] = bot
+	log.Printf("🤖 Arena bot spawned: %s", e.arenaBotName)
+}
+
+// SetArenaBotEnabled enables or disables the arena bot
+func (e *Engine) SetArenaBotEnabled(enabled bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.arenaBotEnabled = enabled
 }
