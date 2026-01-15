@@ -691,22 +691,59 @@ func (s *StreamManager) renderAndSendFrame() {
 // renderFrameFromSnapshot renders a frame using the lock-free game snapshot
 // This method uses immutable snapshot data and never blocks on game state
 func (s *StreamManager) renderFrameFromSnapshot(snap *game.GameSnapshot, buffer []byte, dc *gg.Context) {
-	// Background with solid color
-	dc.SetColor(color.RGBA{12, 12, 28, 255})
+	// Background with white color
+	dc.SetColor(color.RGBA{250, 250, 255, 255}) // Soft white
 	dc.DrawRectangle(0, 0, float64(s.config.Width), float64(s.config.Height))
 	dc.Fill()
 
-	// Stars (deterministic positions)
-	dc.SetColor(color.White)
-	for i := 0; i < 30; i++ {
-		x := float64((i * 67) % s.config.Width)
-		y := float64((i * 47) % s.config.Height)
-		dc.DrawCircle(x, y, 1)
+	// Abstract galaxy constellation - connected stars (black on white)
+	// Generate deterministic star positions
+	type starPos struct {
+		x, y float64
+	}
+	stars := make([]starPos, 40)
+	for i := 0; i < 40; i++ {
+		stars[i] = starPos{
+			x: float64((i*67 + i*i*3) % s.config.Width),
+			y: float64((i*47 + i*i*2) % s.config.Height),
+		}
+	}
+
+	// Draw constellation lines connecting nearby stars (abstract network)
+	dc.SetColor(color.RGBA{30, 30, 40, 40}) // Very subtle dark lines
+	dc.SetLineWidth(1)
+	for i := 0; i < len(stars); i++ {
+		for j := i + 1; j < len(stars); j++ {
+			dx := stars[i].x - stars[j].x
+			dy := stars[i].y - stars[j].y
+			dist := dx*dx + dy*dy
+			// Connect stars within certain distance (creates network effect)
+			if dist < 40000 && dist > 5000 { // 200px radius, min 70px
+				dc.DrawLine(stars[i].x, stars[i].y, stars[j].x, stars[j].y)
+				dc.Stroke()
+			}
+		}
+	}
+
+	// Draw the stars/nodes themselves
+	for i, star := range stars {
+		// Vary star sizes for depth
+		size := 2.0
+		if i%3 == 0 {
+			size = 3.0
+			dc.SetColor(color.RGBA{20, 20, 30, 80}) // Darker larger stars
+		} else if i%5 == 0 {
+			size = 1.5
+			dc.SetColor(color.RGBA{40, 40, 50, 60}) // Medium stars
+		} else {
+			dc.SetColor(color.RGBA{60, 60, 70, 50}) // Subtle small stars
+		}
+		dc.DrawCircle(star.x, star.y, size)
 		dc.Fill()
 	}
 
-	// Grid
-	dc.SetColor(color.RGBA{30, 30, 45, 255})
+	// Subtle grid overlay (very light)
+	dc.SetColor(color.RGBA{200, 200, 210, 30}) // Very subtle gray grid
 	dc.SetLineWidth(1)
 	gridSize := 100.0
 	for x := 0.0; x < float64(s.config.Width); x += gridSize {
@@ -1501,16 +1538,12 @@ func (s *StreamManager) drawProjectilesFromSnapshot(dc *gg.Context, projectiles 
 // drawUIFromSnapshot draws the UI using snapshot data
 // Leaderboard is already sorted in the snapshot (moved from render to game tick)
 func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapshot) {
-	// === ENGAGING CALL TO ACTION BANNER ===
-	// Draw gradient-like banner background
-	dc.SetColor(color.RGBA{0, 150, 255, 200}) // Kick blue
-	dc.DrawRoundedRectangle(15, 10, 400, 75, 10)
-	dc.Fill()
-
-	// Inner glow effect
-	dc.SetColor(color.RGBA{50, 200, 255, 150})
-	dc.DrawRoundedRectangle(20, 15, 390, 65, 8)
-	dc.Fill()
+	// === CLEAN PROFESSIONAL CALL TO ACTION BANNER ===
+	// Subtle border outline only (no filled background)
+	dc.SetColor(color.RGBA{80, 200, 120, 255}) // Green border
+	dc.SetLineWidth(2)
+	dc.DrawRoundedRectangle(15, 10, 420, 80, 8)
+	dc.Stroke()
 
 	// Main title - "PLAY NOW!" with shadow
 	if s.fontsLoaded && s.fontLarge != nil {
@@ -1520,21 +1553,25 @@ func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapsh
 	}
 
 	// Text shadow
-	dc.SetColor(color.RGBA{0, 0, 0, 180})
-	dc.DrawString("PLAY NOW!", 32, 55)
+	dc.SetColor(color.RGBA{0, 0, 0, 200})
+	dc.DrawString("PLAY NOW!", 32, 45)
 
-	// Main text with bright color
-	dc.SetColor(color.RGBA{255, 255, 100, 255}) // Yellow/gold
-	dc.DrawString("PLAY NOW!", 30, 53)
+	// Main text with bright yellow
+	dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
+	dc.DrawString("PLAY NOW!", 30, 43)
 
-	// Subtitle - command hint
+	// First subtitle line
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	} else {
-		_ = dc.LoadFontFace(getFontPath(), 16)
+		_ = dc.LoadFontFace(getFontPath(), 14)
 	}
 	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString("Type !join in chat to fight!", 30, 75)
+	dc.DrawString("Type !join and prove you're the killer.", 30, 63)
+
+	// Second subtitle line
+	dc.SetColor(color.RGBA{180, 180, 180, 255}) // Lighter gray
+	dc.DrawString("See more commands in the channel description.", 30, 80)
 
 	// === PLAYER COUNT BADGE (right side) ===
 	aliveText := fmt.Sprintf("%d FIGHTING", snap.AliveCount)
@@ -1567,13 +1604,7 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 		limit = len(players)
 	}
 
-	// Semi-transparent background for leaderboard
-	bgHeight := float64(limit*28 + 40)
-	dc.SetColor(color.RGBA{0, 0, 0, 150})
-	dc.DrawRoundedRectangle(x-10, y-25, 280, bgHeight, 8)
-	dc.Fill()
-
-	// Header with icon
+	// Header with icon (no background - transparent to show game behind)
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	} else {
