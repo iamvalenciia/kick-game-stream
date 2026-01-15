@@ -742,19 +742,6 @@ func (s *StreamManager) renderFrameFromSnapshot(snap *game.GameSnapshot, buffer 
 		dc.Fill()
 	}
 
-	// Subtle grid overlay (very light)
-	dc.SetColor(color.RGBA{200, 200, 210, 30}) // Very subtle gray grid
-	dc.SetLineWidth(1)
-	gridSize := 100.0
-	for x := 0.0; x < float64(s.config.Width); x += gridSize {
-		dc.DrawLine(x, 0, x, float64(s.config.Height))
-		dc.Stroke()
-	}
-	for y := 0.0; y < float64(s.config.Height); y += gridSize {
-		dc.DrawLine(0, y, float64(s.config.Width), y)
-		dc.Stroke()
-	}
-
 	// Players from snapshot (immutable, no lock needed)
 	s.drawPlayersFromSnapshot(dc, snap.Players)
 
@@ -823,19 +810,6 @@ func (s *StreamManager) renderFrameToBuffer(state game.GameState, buffer []byte,
 		y := float64((i * 47) % s.config.Height)
 		dc.DrawCircle(x, y, 1)
 		dc.Fill()
-	}
-
-	// Grid
-	dc.SetColor(color.RGBA{30, 30, 45, 255})
-	dc.SetLineWidth(1)
-	gridSize := 100.0
-	for x := 0.0; x < float64(s.config.Width); x += gridSize {
-		dc.DrawLine(x, 0, x, float64(s.config.Height))
-		dc.Stroke()
-	}
-	for y := 0.0; y < float64(s.config.Height); y += gridSize {
-		dc.DrawLine(0, y, float64(s.config.Width), y)
-		dc.Stroke()
 	}
 
 	// Players
@@ -1538,112 +1512,153 @@ func (s *StreamManager) drawProjectilesFromSnapshot(dc *gg.Context, projectiles 
 // drawUIFromSnapshot draws the UI using snapshot data
 // Leaderboard is already sorted in the snapshot (moved from render to game tick)
 func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapshot) {
+	// === PROFESSIONAL SPACING CONSTANTS ===
+	marginLeft := 28.0      // Left margin from screen edge
+	marginTop := 20.0       // Top margin from screen edge
+	paddingX := 24.0        // Horizontal padding inside elements
+	paddingY := 18.0        // Vertical padding inside elements
+	lineSpacingLarge := 26.0 // Space between main text lines
+	lineSpacingSmall := 20.0 // Space between subtitle lines
+	sectionSpacing := 36.0  // Space between major sections
+
 	// === CLEAN PROFESSIONAL CALL TO ACTION BANNER ===
+	bannerX := marginLeft
+	bannerY := marginTop
+	bannerWidth := 460.0
+	bannerHeight := 100.0
+	bannerRadius := 12.0
+
 	// Subtle border outline only (no filled background)
 	dc.SetColor(color.RGBA{80, 200, 120, 255}) // Green border
-	dc.SetLineWidth(2)
-	dc.DrawRoundedRectangle(15, 10, 420, 80, 8)
+	dc.SetLineWidth(2.5)
+	dc.DrawRoundedRectangle(bannerX, bannerY, bannerWidth, bannerHeight, bannerRadius)
 	dc.Stroke()
 
 	// Main title - "PLAY NOW!" with shadow
+	titleX := bannerX + paddingX
+	titleY := bannerY + paddingY + 30.0
+
 	if s.fontsLoaded && s.fontLarge != nil {
 		dc.SetFontFace(s.fontLarge)
 	} else {
 		_ = dc.LoadFontFace(getFontPath(), 36)
 	}
 
-	// Text shadow
-	dc.SetColor(color.RGBA{0, 0, 0, 200})
-	dc.DrawString("PLAY NOW!", 32, 45)
+	// Text shadow for depth
+	dc.SetColor(color.RGBA{0, 0, 0, 160})
+	dc.DrawString("PLAY NOW!", titleX+2, titleY+2)
 
 	// Main text with bright yellow
 	dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
-	dc.DrawString("PLAY NOW!", 30, 43)
+	dc.DrawString("PLAY NOW!", titleX, titleY)
 
-	// First subtitle line
+	// First subtitle line with proper spacing
+	subtitleY := titleY + lineSpacingLarge + 4.0
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	} else {
 		_ = dc.LoadFontFace(getFontPath(), 14)
 	}
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString("Type !join and prove you're the killer.", 30, 63)
+	dc.SetColor(color.RGBA{40, 40, 50, 255}) // Dark text for white background
+	dc.DrawString("Type !join and prove you're the killer.", titleX, subtitleY)
 
-	// Second subtitle line
-	dc.SetColor(color.RGBA{180, 180, 180, 255}) // Lighter gray
-	dc.DrawString("See more commands in the channel description.", 30, 80)
+	// Second subtitle line with consistent spacing
+	subtitle2Y := subtitleY + lineSpacingSmall
+	dc.SetColor(color.RGBA{100, 100, 110, 255}) // Medium dark gray for white background
+	dc.DrawString("See more commands in the channel description.", titleX, subtitle2Y)
 
 	// === PLAYER COUNT BADGE (right side) ===
+	badgePaddingX := 18.0
+	badgeHeight := 44.0
+	badgeWidth := 150.0
+	badgeX := float64(s.config.Width) - badgeWidth - marginLeft
+	badgeY := marginTop
+
 	aliveText := fmt.Sprintf("%d FIGHTING", snap.AliveCount)
 	dc.SetColor(color.RGBA{255, 62, 62, 200}) // Red badge
-	dc.DrawRoundedRectangle(float64(s.config.Width)-150, 10, 135, 35, 8)
+	dc.DrawRoundedRectangle(badgeX, badgeY, badgeWidth, badgeHeight, 10)
 	dc.Fill()
 
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	}
 	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString(aliveText, float64(s.config.Width)-140, 33)
+	dc.DrawString(aliveText, badgeX+badgePaddingX, badgeY+(badgeHeight/2)+6)
 
-	// === LEADERBOARD ===
-	s.drawLeaderboardFromSnapshot(dc, snap.Players)
+	// === LEADERBOARD with proper spacing from banner ===
+	leaderboardX := marginLeft
+	leaderboardY := bannerY + bannerHeight + sectionSpacing
+	s.drawLeaderboardFromSnapshotStyled(dc, snap.Players, leaderboardX, leaderboardY)
 }
 
-// drawLeaderboardFromSnapshot draws the leaderboard without re-sorting
+// drawLeaderboardFromSnapshotStyled draws the leaderboard with professional styling
 // Players are pre-sorted by kills in the snapshot production phase
-func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []game.PlayerSnapshot) {
+func (s *StreamManager) drawLeaderboardFromSnapshotStyled(dc *gg.Context, players []game.PlayerSnapshot, startX, startY float64) {
 	if len(players) == 0 {
 		return
 	}
 
-	x := 30.0
-	y := 105.0 // Moved down to account for banner
+	// Professional spacing for leaderboard
+	headerSpacing := 32.0   // Space after header
+	entrySpacing := 30.0    // Space between each player entry
+	nameKillsGap := 12.0    // Visual gap concept (handled by formatting)
+	_ = nameKillsGap        // Used conceptually in text formatting
+
+	x := startX
+	y := startY
 
 	limit := 8 // Show top 8 for cleaner look
 	if len(players) < limit {
 		limit = len(players)
 	}
 
-	// Header with icon (no background - transparent to show game behind)
+	// Header with icon - larger font for emphasis
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 	} else {
 		_ = dc.LoadFontFace(getFontPath(), 18)
 	}
-	dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
-	dc.DrawString("🏆 TOP KILLERS", x, y)
-	y += 28
+	dc.SetColor(color.RGBA{180, 140, 0, 255}) // Dark Gold - better contrast on white
+	dc.DrawString("TOP KILLERS", x, y)
+	y += headerSpacing
 
-	// Players - already sorted in snapshot
+	// Players - already sorted in snapshot with consistent spacing
 	for i := 0; i < limit; i++ {
 		p := players[i]
 
-		// Medal/rank indicator and color
+		// Medal/rank indicator and color (dark colors for white background contrast)
 		var rankIcon string
 		switch i {
 		case 0:
-			dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
-			rankIcon = "🥇"
+			dc.SetColor(color.RGBA{180, 140, 0, 255}) // Dark Gold
+			rankIcon = "1."
 		case 1:
-			dc.SetColor(color.RGBA{192, 192, 192, 255}) // Silver
-			rankIcon = "🥈"
+			dc.SetColor(color.RGBA{100, 100, 120, 255}) // Dark Slate (silver replacement)
+			rankIcon = "2."
 		case 2:
-			dc.SetColor(color.RGBA{205, 127, 50, 255}) // Bronze
-			rankIcon = "🥉"
+			dc.SetColor(color.RGBA{160, 90, 30, 255}) // Dark Bronze
+			rankIcon = "3."
 		default:
-			dc.SetColor(color.RGBA{200, 200, 200, 255}) // Gray
+			dc.SetColor(color.RGBA{80, 80, 100, 255}) // Dark Slate Gray
 			rankIcon = fmt.Sprintf("%d.", i+1)
 		}
 
 		status := ""
 		if p.IsDead {
-			status = " 💀"
+			status = " (dead)"
 		}
 
-		text := fmt.Sprintf("%s %s%s: %d", rankIcon, p.Name, status, p.Kills)
+		// Format with consistent spacing: "1.  Name: kills"
+		text := fmt.Sprintf("%-3s %s%s : %d", rankIcon, p.Name, status, p.Kills)
 		dc.DrawString(text, x, y)
-		y += 28
+		y += entrySpacing
 	}
+}
+
+// drawLeaderboardFromSnapshot draws the leaderboard without re-sorting (legacy support)
+// Players are pre-sorted by kills in the snapshot production phase
+func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []game.PlayerSnapshot) {
+	s.drawLeaderboardFromSnapshotStyled(dc, players, 28.0, 156.0)
 }
 
 // drawWeaponAttack renders attack animation based on weapon type
