@@ -127,6 +127,9 @@ func getWeaponEmoji(weapon string) string {
 
 // processEvent handles the actual sending and error recovery
 func (b *Bot) processEvent(event KillEvent) {
+	// Delay kill message by 1 second so the kill animation plays before the chat message appears
+	time.Sleep(1 * time.Second)
+
 	// 1. Format Message with weapon emoji and kill count
 	weaponEmoji := getWeaponEmoji(event.Weapon)
 	msg := fmt.Sprintf("%s %s eliminated %s (%d kills)", weaponEmoji, event.Killer, event.Victim, event.KillerKills)
