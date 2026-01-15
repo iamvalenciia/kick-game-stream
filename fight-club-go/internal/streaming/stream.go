@@ -993,14 +993,14 @@ func (s *StreamManager) drawPlayer(dc *gg.Context, p *game.Player) {
 	dc.DrawRectangle(p.X-hpBarWidth/2, p.Y-50, hpBarWidth*hpPercent, hpBarHeight)
 	dc.Fill()
 
-	// Name
-	dc.SetColor(color.White)
+	// Name - dark color for visibility on white background
+	dc.SetColor(color.RGBA{20, 25, 35, 255}) // Dark charcoal
 	if err := dc.LoadFontFace(getFontPath(), 16); err == nil {
 		dc.DrawStringAnchored(p.Name, p.X, p.Y+50, 0.5, 0.5)
 	}
 
-	// Money
-	dc.SetColor(color.RGBA{255, 255, 0, 255})
+	// Money - orange for better contrast on white background
+	dc.SetColor(color.RGBA{255, 120, 0, 255}) // Vibrant orange
 	dc.DrawStringAnchored(fmt.Sprintf("$%d", p.Money), p.X, p.Y+70, 0.5, 0.5)
 }
 
@@ -1305,8 +1305,8 @@ func (s *StreamManager) drawPlayerSnapshot(dc *gg.Context, p game.PlayerSnapshot
 	dc.DrawRectangle(p.X-hpBarWidth/2, p.Y-50, hpBarWidth*hpPercent, hpBarHeight)
 	dc.Fill()
 
-	// Name - use cached font if available
-	dc.SetColor(color.White)
+	// Name - use cached font if available (dark color for visibility on white bg)
+	dc.SetColor(color.RGBA{20, 25, 35, 255}) // Dark charcoal for good contrast
 	if s.fontsLoaded && s.fontSmall != nil {
 		dc.SetFontFace(s.fontSmall)
 		dc.DrawStringAnchored(p.Name, p.X, p.Y+50, 0.5, 0.5)
@@ -1314,8 +1314,8 @@ func (s *StreamManager) drawPlayerSnapshot(dc *gg.Context, p game.PlayerSnapshot
 		dc.DrawStringAnchored(p.Name, p.X, p.Y+50, 0.5, 0.5)
 	}
 
-	// Money
-	dc.SetColor(color.RGBA{255, 255, 0, 255})
+	// Money - orange for better contrast on white background
+	dc.SetColor(color.RGBA{255, 120, 0, 255}) // Vibrant orange
 	dc.DrawStringAnchored(fmt.Sprintf("$%d", p.Money), p.X, p.Y+70, 0.5, 0.5)
 }
 
@@ -1543,7 +1543,7 @@ func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapsh
 
 	// "PLAY NOW" title - bold and impactful
 	titleX := cardX + 20.0
-	titleY := cardY + 38.0
+	titleY := cardY + 46.0 // Added more top padding for centered look
 
 	if s.fontsLoaded && s.fontLarge != nil {
 		dc.SetFontFace(s.fontLarge)
