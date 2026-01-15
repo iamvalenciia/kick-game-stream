@@ -254,8 +254,9 @@ func (s *StreamManager) Start() error {
 
 	log.Println("   🎥 Using libx264 CPU encoding")
 
-	// Build FFmpeg arguments
-	// Audio is piped from Go audio mixer (handles music + SFX together)
+	// Build FFmpeg arguments - CROSS-PLATFORM
+	// Windows: Uses file-based audio (ExtraFiles not supported)
+	// Linux/macOS: Uses piped audio for full SFX support
 	args := []string{
 		"-y",
 		// Video input (pipe:0 - stdin)
@@ -264,18 +265,50 @@ func (s *StreamManager) Start() error {
 		"-s", fmt.Sprintf("%dx%d", s.config.Width, s.config.Height),
 		"-r", fmt.Sprintf("%d", s.config.FPS),
 		"-i", "pipe:0",
-		// Audio input (pipe:3 - extra file)
-		"-f", "s16le",
-		"-ar", "44100",
-		"-ac", "2",
-		"-i", "pipe:3",
 	}
 
-	// Log audio configuration
-	if s.config.MusicEnabled && s.config.MusicPath != "" {
+	// Audio input - platform specific
+	useAudioPipe := runtime.GOOS != "windows"
+	musicPath := s.config.MusicPath
+	musicFileExists := false
+	if s.config.MusicEnabled && musicPath != "" {
+		if _, err := os.Stat(musicPath); err == nil {
+			musicFileExists = true
+		}
+	}
+
+	if useAudioPipe {
+		// Linux/macOS: Use piped audio (supports SFX + music mixing)
+		args = append(args,
+			"-f", "s16le",
+			"-ar", "44100",
+			"-ac", "2",
+			"-i", "pipe:3",
+		)
+		log.Println("   🔊 Sound effects: enabled (piped audio)")
+	} else {
+		// Windows: Use file-based audio (no SFX support yet)
+		if musicFileExists {
+			log.Printf("   🎵 Background music: %s (volume: %.0f%%)", musicPath, s.config.MusicVolume*100)
+			args = append(args,
+				"-stream_loop", "-1",
+				"-i", musicPath,
+			)
+		} else {
+			if s.config.MusicEnabled && musicPath != "" {
+				log.Printf("   ⚠️ Music file not found: %s, using silent audio", musicPath)
+			}
+			args = append(args,
+				"-f", "lavfi",
+				"-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+			)
+		}
+		log.Println("   ⚠️ Sound effects: disabled on Windows (file-based audio)")
+	}
+
+	if s.config.MusicEnabled && s.config.MusicPath != "" && useAudioPipe {
 		log.Printf("   🎵 Background music: %s (volume: %.0f%%)", s.config.MusicPath, s.config.MusicVolume*100)
 	}
-	log.Println("   🔊 Sound effects: enabled (piped from Go audio mixer)")
 
 	// Video encoding - optimized for speed
 	args = append(args,
@@ -292,13 +325,24 @@ func (s *StreamManager) Start() error {
 		"-profile:v", "main",
 	)
 
-	// Audio encoding (piped from Go audio mixer)
-	args = append(args,
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-ar", "44100",
-		"-ac", "2",
-	)
+	// Audio encoding
+	if !useAudioPipe && musicFileExists {
+		// Windows with music file: apply volume filter
+		args = append(args,
+			"-af", fmt.Sprintf("volume=%.2f", s.config.MusicVolume),
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ar", "44100",
+			"-ac", "2",
+		)
+	} else {
+		args = append(args,
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ar", "44100",
+			"-ac", "2",
+		)
+	}
 
 	// Map streams and output
 	args = append(args,
@@ -321,13 +365,15 @@ func (s *StreamManager) Start() error {
 		return fmt.Errorf("failed to create video pipe: %w", err)
 	}
 
-	// Create audio pipe (fd 3 via ExtraFiles)
-	audioReader, audioWriter, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("failed to create audio pipe: %w", err)
+	// Create audio pipe (fd 3 via ExtraFiles) - Linux/macOS only
+	if useAudioPipe {
+		audioReader, audioWriter, err := os.Pipe()
+		if err != nil {
+			return fmt.Errorf("failed to create audio pipe: %w", err)
+		}
+		s.audioPipe = audioWriter
+		s.ffmpeg.ExtraFiles = []*os.File{audioReader} // fd 3
 	}
-	s.audioPipe = audioWriter
-	s.ffmpeg.ExtraFiles = []*os.File{audioReader} // fd 3
 
 	// Capture stderr for debugging
 	s.ffmpeg.Stderr = os.Stderr
@@ -346,8 +392,10 @@ func (s *StreamManager) Start() error {
 	// Start frame loop (video)
 	go s.frameLoop()
 
-	// Start audio loop (sound effects + music)
-	go s.audioLoop()
+	// Start audio loop (sound effects + music) - Linux/macOS only
+	if useAudioPipe {
+		go s.audioLoop()
+	}
 
 	log.Println("✅ Stream started!")
 
