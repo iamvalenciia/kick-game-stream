@@ -121,7 +121,7 @@ func NewPlayer(name string, opts PlayerOptions) *Player {
 		Color:           color,
 		Avatar:          avatars[rand.Intn(len(avatars))],
 		SpawnProtection: true,
-		SpawnTimer:      1.5,                      // 1.5 seconds spawn protection (was 3.0)
+		SpawnTimer:      0.3, // Reduced to 0.3s for instant combat (was 1.5)
 		Aggression:      0.5 + rand.Float64()*0.5, // 0.5 to 1.0
 		ProfilePic:      opts.ProfilePic,
 		Stamina:         MaxStamina,
@@ -215,7 +215,8 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 	if p.FocusTarget != "" {
 		for _, other := range players {
 			if other.Name == p.FocusTarget {
-				if !other.IsDead && !other.IsRagdoll && !other.SpawnProtection {
+				if !other.IsDead && !other.IsRagdoll {
+					// NOTE: Allows targeting spawn-protected - approach immediately
 					// Also check team - can't focus teammates
 					if p.TeamID == "" || p.TeamID != other.TeamID {
 						p.Target = other
@@ -244,9 +245,11 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 			continue // Skip self
 		}
 		other := players[idx]
-		if other.IsDead || other.IsRagdoll || other.SpawnProtection {
+		if other.IsDead || other.IsRagdoll {
 			continue
 		}
+		// NOTE: Removed SpawnProtection check - allows approaching spawn-protected
+		// targets immediately. Attack will be blocked, but movement starts instantly.
 		// Skip teammates (no friendly fire)
 		if p.TeamID != "" && p.TeamID == other.TeamID {
 			continue
@@ -267,9 +270,10 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 			if uint32(i) == selfIdx {
 				continue
 			}
-			if other.IsDead || other.IsRagdoll || other.SpawnProtection {
+			if other.IsDead || other.IsRagdoll {
 				continue
 			}
+			// NOTE: Allows targeting spawn-protected for immediate approach
 			// Skip teammates
 			if p.TeamID != "" && p.TeamID == other.TeamID {
 				continue
@@ -287,7 +291,7 @@ func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.Spa
 }
 
 // combatBehavior handles all combat AI - approaching, attacking, retreating
-// OPTIMIZED: Direct approach for fast combat engagement, flow fields only for long distance
+// OPTIMIZED: No dead zones - always moving or attacking for instant combat
 func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 	if p.Target == nil {
 		return
@@ -304,24 +308,38 @@ func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 		dy /= dist
 	}
 
-	// Decide action based on distance and cooldown
 	attackRange := weapon.Range
+	canAttack := p.AttackCooldown <= 0 && !p.Target.SpawnProtection && !p.SpawnProtection
 
-	// IMMEDIATE ATTACK: In range and ready
-	if dist <= attackRange && p.AttackCooldown <= 0 && !p.Target.SpawnProtection && !p.SpawnProtection {
+	// Always face target first
+	p.AttackAngle = math.Atan2(dy, dx)
+
+	// IMMEDIATE ATTACK: In range and ready - highest priority
+	if dist <= attackRange && canAttack {
 		p.attack(engine)
 		// Small backwards movement after attack
 		p.VX -= dx * 1.5
 		p.VY -= dy * 1.5
-		p.AttackAngle = math.Atan2(dy, dx)
 		return
 	}
 
-	// APPROACH TARGET - always move toward enemy aggressively
-	if dist > attackRange*0.6 {
-		// Calculate move speed based on distance and aggression
-		moveSpeed := 5.0 * p.Aggression // Increased from 4.0
+	// MOVEMENT LOGIC: No dead zones - always moving toward optimal position
+	moveSpeed := 5.0 * p.Aggression
+	minCombatDist := 40.0 // Minimum distance to maintain (avoids clipping)
 
+	if dist < minCombatDist {
+		// TOO CLOSE - back up slightly while strafing
+		perpX := -dy
+		perpY := dx
+		if rand.Float64() < 0.5 {
+			perpX = dy
+			perpY = -dx
+		}
+		// Move backward + strafe
+		p.VX += (-dx*0.5 + perpX*0.5) * 3.0 * deltaTime * 60
+		p.VY += (-dy*0.5 + perpY*0.5) * 3.0 * deltaTime * 60
+	} else if dist > attackRange*0.8 {
+		// OUT OF RANGE - aggressive approach (0.8 gives buffer for attack)
 		// Very far away (>400px) - use flow fields for smart navigation
 		if dist > 400 {
 			if flowMgr := engine.GetFlowFieldManager(); flowMgr != nil {
@@ -330,7 +348,6 @@ func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 				flowX, flowY := field.Lookup(p.X, p.Y)
 
 				if flowX != 0 || flowY != 0 {
-					// Use flow direction but stay responsive
 					blendedDX := float64(flowX)*0.5 + dx*0.5
 					blendedDY := float64(flowY)*0.5 + dy*0.5
 					length := math.Sqrt(blendedDX*blendedDX + blendedDY*blendedDY)
@@ -341,34 +358,31 @@ func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 					p.VX += blendedDX * moveSpeed * deltaTime * 60
 					p.VY += blendedDY * moveSpeed * deltaTime * 60
 				} else {
-					// Direct approach
 					p.VX += dx * moveSpeed * deltaTime * 60
 					p.VY += dy * moveSpeed * deltaTime * 60
 				}
 			} else {
-				// Direct approach
 				p.VX += dx * moveSpeed * deltaTime * 60
 				p.VY += dy * moveSpeed * deltaTime * 60
 			}
 		} else {
-			// Close-mid range: DIRECT aggressive approach (no flow field delay)
+			// Close-mid range: DIRECT aggressive approach
 			p.VX += dx * moveSpeed * deltaTime * 60
 			p.VY += dy * moveSpeed * deltaTime * 60
 		}
-	} else if dist < attackRange*0.4 {
-		// TOO CLOSE - strafe while waiting for cooldown
+	} else {
+		// IN ATTACK ZONE but waiting for cooldown - aggressive strafe toward target
+		// Mix of approach + strafe to stay in range and pressure
 		perpX := -dy
 		perpY := dx
 		if rand.Float64() < 0.5 {
 			perpX = dy
 			perpY = -dx
 		}
-		p.VX += perpX * 2.5 * deltaTime * 60
-		p.VY += perpY * 2.5 * deltaTime * 60
+		// 70% strafe, 30% approach - keeps pressure on
+		p.VX += (dx*0.3 + perpX*0.7) * 3.5 * deltaTime * 60
+		p.VY += (dy*0.3 + perpY*0.7) * 3.5 * deltaTime * 60
 	}
-
-	// Always face target
-	p.AttackAngle = math.Atan2(dy, dx)
 }
 
 func (p *Player) wander(deltaTime float64) {
@@ -547,7 +561,7 @@ func (p *Player) Respawn() {
 	p.VX = 0
 	p.VY = 0
 	p.SpawnProtection = true
-	p.SpawnTimer = 3.0
+	p.SpawnTimer = 0.5 // Reduced to 0.5s for fast combat (was 3.0)
 	p.Target = nil
 	p.RagdollRotation = 0
 	p.AttackCooldown = 0
