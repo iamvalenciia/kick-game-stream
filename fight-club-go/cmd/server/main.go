@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"fight-club/internal/api"
@@ -122,10 +123,23 @@ func main() {
 		kickService = kick.NewService(clientID, clientSecret)
 		// ... (rest of init)
 
-		// Set broadcaster ID if avail
+		// Set broadcaster ID if available
 		if broadcasterID != "" {
-			bid, _ := strconv.ParseInt(broadcasterID, 10, 64)
-			kickService.SetBroadcasterID(bid)
+			// Clean the broadcaster ID - remove any leading colons or whitespace
+			cleanedID := strings.TrimSpace(strings.TrimPrefix(broadcasterID, ":"))
+			if cleanedID != broadcasterID {
+				log.Printf("⚠️ Broadcaster ID had invalid format '%s', cleaned to '%s'", broadcasterID, cleanedID)
+				log.Println("💡 TIP: Update KICK_BROADCASTER_USER_ID in your .env file to just the numeric ID")
+			}
+			bid, err := strconv.ParseInt(cleanedID, 10, 64)
+			if err != nil {
+				log.Printf("❌ Failed to parse broadcaster ID '%s': %v", cleanedID, err)
+			} else if bid > 0 {
+				kickService.SetBroadcasterID(bid)
+				log.Printf("✅ Broadcaster ID set: %d", bid)
+			} else {
+				log.Println("⚠️ Broadcaster ID is 0 or negative, ignoring")
+			}
 		}
 
 		if publicURL != "" {
