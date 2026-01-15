@@ -742,19 +742,6 @@ func (s *StreamManager) renderFrameFromSnapshot(snap *game.GameSnapshot, buffer 
 		dc.Fill()
 	}
 
-	// Subtle grid overlay (very light)
-	dc.SetColor(color.RGBA{200, 200, 210, 30}) // Very subtle gray grid
-	dc.SetLineWidth(1)
-	gridSize := 100.0
-	for x := 0.0; x < float64(s.config.Width); x += gridSize {
-		dc.DrawLine(x, 0, x, float64(s.config.Height))
-		dc.Stroke()
-	}
-	for y := 0.0; y < float64(s.config.Height); y += gridSize {
-		dc.DrawLine(0, y, float64(s.config.Width), y)
-		dc.Stroke()
-	}
-
 	// Players from snapshot (immutable, no lock needed)
 	s.drawPlayersFromSnapshot(dc, snap.Players)
 
@@ -823,19 +810,6 @@ func (s *StreamManager) renderFrameToBuffer(state game.GameState, buffer []byte,
 		y := float64((i * 47) % s.config.Height)
 		dc.DrawCircle(x, y, 1)
 		dc.Fill()
-	}
-
-	// Grid
-	dc.SetColor(color.RGBA{30, 30, 45, 255})
-	dc.SetLineWidth(1)
-	gridSize := 100.0
-	for x := 0.0; x < float64(s.config.Width); x += gridSize {
-		dc.DrawLine(x, 0, x, float64(s.config.Height))
-		dc.Stroke()
-	}
-	for y := 0.0; y < float64(s.config.Height); y += gridSize {
-		dc.DrawLine(0, y, float64(s.config.Width), y)
-		dc.Stroke()
 	}
 
 	// Players
@@ -1566,11 +1540,11 @@ func (s *StreamManager) drawUIFromSnapshot(dc *gg.Context, snap *game.GameSnapsh
 	} else {
 		_ = dc.LoadFontFace(getFontPath(), 14)
 	}
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
+	dc.SetColor(color.RGBA{40, 40, 50, 255}) // Dark text for white background
 	dc.DrawString("Type !join and prove you're the killer.", 30, 63)
 
 	// Second subtitle line
-	dc.SetColor(color.RGBA{180, 180, 180, 255}) // Lighter gray
+	dc.SetColor(color.RGBA{100, 100, 110, 255}) // Medium dark gray for white background
 	dc.DrawString("See more commands in the channel description.", 30, 80)
 
 	// === PLAYER COUNT BADGE (right side) ===
@@ -1610,7 +1584,7 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 	} else {
 		_ = dc.LoadFontFace(getFontPath(), 18)
 	}
-	dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
+	dc.SetColor(color.RGBA{180, 140, 0, 255}) // Dark Gold - better contrast on white
 	dc.DrawString("🏆 TOP KILLERS", x, y)
 	y += 28
 
@@ -1618,20 +1592,20 @@ func (s *StreamManager) drawLeaderboardFromSnapshot(dc *gg.Context, players []ga
 	for i := 0; i < limit; i++ {
 		p := players[i]
 
-		// Medal/rank indicator and color
+		// Medal/rank indicator and color (dark colors for white background contrast)
 		var rankIcon string
 		switch i {
 		case 0:
-			dc.SetColor(color.RGBA{255, 215, 0, 255}) // Gold
+			dc.SetColor(color.RGBA{180, 140, 0, 255}) // Dark Gold
 			rankIcon = "🥇"
 		case 1:
-			dc.SetColor(color.RGBA{192, 192, 192, 255}) // Silver
+			dc.SetColor(color.RGBA{100, 100, 120, 255}) // Dark Slate (silver replacement)
 			rankIcon = "🥈"
 		case 2:
-			dc.SetColor(color.RGBA{205, 127, 50, 255}) // Bronze
+			dc.SetColor(color.RGBA{160, 90, 30, 255}) // Dark Bronze
 			rankIcon = "🥉"
 		default:
-			dc.SetColor(color.RGBA{200, 200, 200, 255}) // Gray
+			dc.SetColor(color.RGBA{80, 80, 100, 255}) // Dark Slate Gray
 			rankIcon = fmt.Sprintf("%d.", i+1)
 		}
 
