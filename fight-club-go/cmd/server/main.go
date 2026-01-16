@@ -11,6 +11,7 @@ import (
 	"fight-club/internal/api"
 	"fight-club/internal/avatar"
 	"fight-club/internal/chat"
+	"fight-club/internal/config"
 	"fight-club/internal/game"
 	"fight-club/internal/kick"
 	"fight-club/internal/streaming"
@@ -34,18 +35,21 @@ func main() {
 	log.Println("🎮  Kick OAuth + Webhooks")
 	log.Println("🎮 ================================")
 
-	// Load environment variables
+	// Load centralized configuration (SSOT - Single Source of Truth)
+	appConfig := config.Load()
+	videoCfg := appConfig.Video
+	audioCfg := appConfig.Audio
+	serverCfg := appConfig.Server
+
+	// Load environment variables for external services
 	streamKey := os.Getenv("STREAM_KEY_KICK")
 	clientID := os.Getenv("CLIENT_ID_KICK")
 	clientSecret := os.Getenv("CLIENT_SECRET_KICK")
 	broadcasterID := os.Getenv("KICK_BROADCASTER_USER_ID")
 	publicURL := os.Getenv("PUBLIC_URL") // For webhook callbacks (e.g., ngrok URL)
 
-	// Stream config
-	port := getEnvWithDefault("PORT", "3000")
-	fps := getEnvInt("STREAM_FPS", 30)
-	bitrate := getEnvInt("STREAM_BITRATE", 6000)
-	tickRate := getEnvInt("GAME_TICK_RATE", 30)
+	// Port from config (allows env override via serverCfg)
+	port := strconv.Itoa(serverCfg.Port)
 
 	// Kick RTMP URL
 	rtmpURL := "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app"
@@ -67,10 +71,15 @@ func main() {
 	if publicURL != "" {
 		log.Printf("🌐 Public URL: %s", publicURL)
 	}
-	log.Printf("🎮 Config: %d TPS, %d FPS, %dk bitrate", tickRate, fps, bitrate)
+	log.Printf("🎮 Config: %d TPS, %d FPS, %dk bitrate, %dx%d", videoCfg.FPS, videoCfg.FPS, videoCfg.Bitrate, videoCfg.Width, videoCfg.Height)
 
-	// Create game engine
-	engine := game.NewEngine(tickRate)
+	// Create game engine with centralized config
+	engine := game.NewEngine(game.EngineConfig{
+		TickRate:    videoCfg.FPS, // Use FPS as tick rate for consistency
+		WorldWidth:  videoCfg.Width,
+		WorldHeight: videoCfg.Height,
+		Limits:      appConfig.Limits,
+	})
 	limits := engine.GetLimits()
 	log.Printf("🛡️ Resource limits: %d players, %d particles, %d effects, %d texts",
 		limits.MaxPlayers, limits.MaxParticles, limits.MaxEffects, limits.MaxTexts)
@@ -91,21 +100,19 @@ func main() {
 		}
 	}
 
-	// Music configuration
-	musicEnabled := os.Getenv("MUSIC_ENABLED") != "false" // Default: enabled
-	musicVolume := getEnvFloat("MUSIC_VOLUME", 0.15)      // Default: 15%
+	// Music configuration from centralized config
 	musicPath := getEnvWithDefault("MUSIC_PATH", "assets/music/digital_fight_arena.ogg")
 
-	// Create stream manager
+	// Create stream manager with centralized video config
 	streamer := streaming.NewStreamManager(engine, streaming.StreamConfig{
-		Width:        1920,
-		Height:       1080,
-		FPS:          fps,
-		Bitrate:      bitrate,
+		Width:        videoCfg.Width,
+		Height:       videoCfg.Height,
+		FPS:          videoCfg.FPS,
+		Bitrate:      videoCfg.Bitrate,
 		RTMPURL:      rtmpURL,
 		StreamKey:    streamKey,
-		MusicEnabled: musicEnabled,
-		MusicVolume:  musicVolume,
+		MusicEnabled: audioCfg.Enabled,
+		MusicVolume:  audioCfg.Volume,
 		MusicPath:    musicPath,
 	})
 

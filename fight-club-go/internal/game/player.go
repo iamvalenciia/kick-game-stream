@@ -84,12 +84,18 @@ type Player struct {
 	// Chat bubble (visible above player)
 	ChatBubble    string  `json:"chatBubble"`
 	ChatBubbleTTL float64 `json:"-"`
+
+	// World bounds (stored for consistent bounds clamping)
+	worldWidth  float64
+	worldHeight float64
 }
 
 // PlayerOptions contains options for creating a player
 type PlayerOptions struct {
-	ProfilePic string
-	Color      string
+	ProfilePic  string
+	Color       string
+	WorldWidth  float64 // Spawn bounds - defaults to 1280 if not set
+	WorldHeight float64 // Spawn bounds - defaults to 720 if not set
 }
 
 var playerColors = []string{
@@ -109,11 +115,21 @@ func NewPlayer(name string, opts PlayerOptions) *Player {
 		color = playerColors[rand.Intn(len(playerColors))]
 	}
 
+	// Use provided world bounds or defaults
+	worldWidth := opts.WorldWidth
+	worldHeight := opts.WorldHeight
+	if worldWidth == 0 {
+		worldWidth = 1280
+	}
+	if worldHeight == 0 {
+		worldHeight = 720
+	}
+
 	return &Player{
 		ID:              id,
 		Name:            name,
-		X:               rand.Float64() * 1280,
-		Y:               rand.Float64() * 720,
+		X:               rand.Float64() * worldWidth,
+		Y:               rand.Float64() * worldHeight,
 		HP:              100,
 		MaxHP:           100,
 		Money:           0,
@@ -127,6 +143,8 @@ func NewPlayer(name string, opts PlayerOptions) *Player {
 		Stamina:         MaxStamina,
 		MaxStamina:      MaxStamina,
 		State:           StateAlive, // Explicitly set initial state
+		worldWidth:      worldWidth,
+		worldHeight:     worldHeight,
 	}
 }
 
@@ -202,9 +220,10 @@ func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.Spatial
 	p.VX *= 0.85
 	p.VY *= 0.85
 
-	// World bounds
-	p.X = math.Max(40, math.Min(1240, p.X))
-	p.Y = math.Max(40, math.Min(680, p.Y))
+	// World bounds (use stored bounds with margin)
+	margin := 40.0
+	p.X = math.Max(margin, math.Min(p.worldWidth-margin, p.X))
+	p.Y = math.Max(margin, math.Min(p.worldHeight-margin, p.Y))
 }
 
 // findTarget uses spatial grid for O(k) neighbor lookup instead of O(n) scan
@@ -386,9 +405,9 @@ func (p *Player) combatBehavior(deltaTime float64, engine *Engine) {
 }
 
 func (p *Player) wander(deltaTime float64) {
-	// Random wandering towards center
-	centerX := 640.0
-	centerY := 360.0
+	// Random wandering towards center (using stored world bounds)
+	centerX := p.worldWidth / 2
+	centerY := p.worldHeight / 2
 
 	dx := centerX - p.X
 	dy := centerY - p.Y
@@ -536,9 +555,10 @@ func (p *Player) UpdateRagdoll(deltaTime float64) {
 	p.VX *= 0.92
 	p.VY *= 0.92
 
-	// World bounds
-	p.X = math.Max(40, math.Min(1240, p.X))
-	p.Y = math.Max(40, math.Min(680, p.Y))
+	// World bounds (use stored bounds with margin)
+	margin := 40.0
+	p.X = math.Max(margin, math.Min(p.worldWidth-margin, p.X))
+	p.Y = math.Max(margin, math.Min(p.worldHeight-margin, p.Y))
 
 	// Timer - ragdoll animation complete
 	p.RagdollTimer -= deltaTime
@@ -556,8 +576,9 @@ func (p *Player) Respawn() {
 	p.IsRagdoll = false
 	p.State = StateAlive
 	p.HP = p.MaxHP
-	p.X = rand.Float64()*1060 + 110
-	p.Y = rand.Float64()*540 + 90
+	// Spawn within 80% of world bounds (10% margin on each side)
+	p.X = rand.Float64()*p.worldWidth*0.8 + p.worldWidth*0.1
+	p.Y = rand.Float64()*p.worldHeight*0.8 + p.worldHeight*0.1
 	p.VX = 0
 	p.VY = 0
 	p.SpawnProtection = true
