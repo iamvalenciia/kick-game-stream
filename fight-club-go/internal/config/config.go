@@ -29,8 +29,8 @@ func DefaultVideo() VideoConfig {
 	return VideoConfig{
 		Width:   1280, // 720p - good balance for VPS encoding
 		Height:  720,
-		FPS:     30,
-		Bitrate: 6000, // kbps - good quality for 720p
+		FPS:     24,   // Reduced from 30 - VPS CPU can't encode 30fps in realtime
+		Bitrate: 4000, // kbps - reduced for faster encoding on VPS
 	}
 }
 
