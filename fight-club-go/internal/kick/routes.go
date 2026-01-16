@@ -7,9 +7,26 @@ import (
 	"net/http"
 )
 
+// OnAuthSuccessFunc is called when OAuth authentication succeeds
+// Returns a session token that will be set as a cookie
+type OnAuthSuccessFunc func(userID int64, username string, broadcasterID int64) (sessionToken string, err error)
+
+// RouteOptions configures optional behaviors for Kick routes
+type RouteOptions struct {
+	// OnAuthSuccess is called after successful OAuth to create admin sessions
+	OnAuthSuccess OnAuthSuccessFunc
+	// SetSessionCookie is called to set the session cookie on the response
+	SetSessionCookie func(w http.ResponseWriter, sessionID string)
+}
+
 // SetupRoutes adds Kick OAuth and webhook routes to a mux
 // localPort is used for OAuth callback (localhost), baseURL is for webhooks (tunnel)
 func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int) {
+	s.SetupRoutesWithOptions(mux, baseURL, localPort, nil)
+}
+
+// SetupRoutesWithOptions adds Kick OAuth and webhook routes with optional callbacks
+func (s *Service) SetupRoutesWithOptions(mux *http.ServeMux, baseURL string, localPort int, opts *RouteOptions) {
 	// OAuth redirect URI - use baseURL to support tunneling (ngrok)
 	// If baseURL is localhost, it works locally. If it's a tunnel, it works remotely.
 	callbackURL := fmt.Sprintf("%s/api/kick/callback", baseURL)
@@ -40,6 +57,20 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 			return
 		}
 
+		// Create admin session if callback is provided
+		sessionCreated := false
+		if opts != nil && opts.OnAuthSuccess != nil && opts.SetSessionCookie != nil {
+			authInfo := s.GetAuthInfo()
+			sessionID, err := opts.OnAuthSuccess(authInfo.UserID, authInfo.Username, authInfo.BroadcasterID)
+			if err != nil {
+				log.Printf("⚠️ Failed to create admin session: %v", err)
+			} else {
+				opts.SetSessionCookie(w, sessionID)
+				sessionCreated = true
+				log.Printf("🔐 Admin session created for user %d", authInfo.UserID)
+			}
+		}
+
 		// Subscribe to chat events in background - don't block the response
 		go func() {
 			defer func() {
@@ -64,9 +95,15 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 
 		log.Println("✅ OAuth callback successful, sending success page")
 
+		// Determine redirect based on session creation
+		redirectTarget := "/admin"
+		if !sessionCreated {
+			redirectTarget = "/login?error=unauthorized"
+		}
+
 		// Return success page that notifies opener and closes popup
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`
+		fmt.Fprintf(w, `
 			<!DOCTYPE html>
 			<html>
 			<head><title>Kick Connected</title></head>
@@ -87,12 +124,12 @@ func (s *Service) SetupRoutes(mux *http.ServeMux, baseURL string, localPort int)
 						setTimeout(() => window.close(), 2000);
 					} else {
 						// No opener, redirect to admin
-						setTimeout(() => window.location.href = '/admin', 3000);
+						setTimeout(() => window.location.href = '%s', 3000);
 					}
 				</script>
 			</body>
 			</html>
-		`))
+		`, redirectTarget)
 	})
 
 	// Webhook endpoint for Kick events (this needs the tunnel URL)

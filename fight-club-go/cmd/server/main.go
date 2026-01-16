@@ -223,15 +223,45 @@ func main() {
 	if p, err := strconv.Atoi(port); err == nil {
 		portInt = p
 	}
+
+	// Admin authentication setup
+	adminAuthEnabled := os.Getenv("ADMIN_AUTH_ENABLED") == "true"
+	var sessionManager *api.SessionManager
+
+	// Parse broadcaster ID for session manager
+	var broadcasterIDInt int64
+	if broadcasterID != "" {
+		broadcasterIDInt, _ = strconv.ParseInt(broadcasterID, 10, 64)
+	}
+
+	if adminAuthEnabled {
+		sessionManager = api.NewSessionManager(broadcasterIDInt)
+		log.Printf("🔐 Admin authentication ENABLED (broadcaster ID: %d)", broadcasterIDInt)
+	} else {
+		log.Println("⚠️ Admin authentication DISABLED (set ADMIN_AUTH_ENABLED=true to enable)")
+	}
+
 	if kickService != nil {
 		mux := http.NewServeMux()
-		kickService.SetupRoutes(mux, baseURL, portInt)
+
+		// Setup routes with session callback if auth is enabled
+		if sessionManager != nil {
+			kickService.SetupRoutesWithOptions(mux, baseURL, portInt, &kick.RouteOptions{
+				OnAuthSuccess: func(userID int64, username string, bcasterID int64) (string, error) {
+					return sessionManager.CreateSession(userID, username, bcasterID)
+				},
+				SetSessionCookie: sessionManager.SetSessionCookie,
+			})
+		} else {
+			kickService.SetupRoutes(mux, baseURL, portInt)
+		}
+
 		kickMux = mux
 		log.Printf("✅ Kick routes mounted at /api/kick (OAuth: localhost:%d, Webhook: %s/api/kick/webhook)", portInt, baseURL)
 	}
 
-	// Create API server with Kick handler
-	server := api.NewServerWithKick(engine, streamer, kickMux)
+	// Create API server with Kick handler and auth
+	server := api.NewServerWithKickAndAuth(engine, streamer, kickMux, sessionManager, adminAuthEnabled)
 
 	// Start game engine
 	engine.Start()
