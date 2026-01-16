@@ -82,12 +82,13 @@ jobs:
         working-directory: ./fight-club-go
         run: |
           echo "Running benchmark suite..."
+          # Run benchmarks and filter out game engine logs (timestamps with emojis/log messages)
           go test -bench=. -benchmem -benchtime=3s -count=3 \
-            ./internal/game/... 2>&1 | tee benchmark_results.txt
+            ./internal/game/... 2>&1 | tee benchmark_raw.txt
 
-          # Parse benchmark results for threshold checking
-          echo "=== Benchmark Results ===" >> $GITHUB_STEP_SUMMARY
-          cat benchmark_results.txt >> $GITHUB_STEP_SUMMARY
+          # Filter to only benchmark lines (start with Benchmark or contain ns/op)
+          grep -E "^(Benchmark|goos:|goarch:|pkg:|cpu:|PASS|ok|---)" benchmark_raw.txt > benchmark_results.txt || true
+          grep "ns/op" benchmark_raw.txt >> benchmark_results.txt || true
 
       - name: Check performance thresholds
         id: check
@@ -98,14 +99,12 @@ jobs:
 
           FAILED=0
 
-          # Function to extract benchmark value (ns/op)
+          # Function to extract benchmark value (ns/op) - more precise pattern
+          # Format: BenchmarkName-N    iterations    time ns/op    bytes B/op    allocs allocs/op
           extract_ns() {
-            grep "$1" benchmark_results.txt | head -1 | awk '{print $3}' | tr -d 'ns/op'
-          }
-
-          # Function to extract allocations (B/op)
-          extract_allocs() {
-            grep "$1" benchmark_results.txt | head -1 | awk '{print $5}' | tr -d 'B/op'
+            local pattern="$1"
+            # Get line with benchmark name and extract the ns/op value (3rd field after benchmark name)
+            grep "^${pattern}" benchmark_results.txt | head -1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+(\.[0-9]+)?$/ && $(i+1) == "ns/op") print $i}'
           }
 
           echo "## Performance Gate Results" >> $GITHUB_STEP_SUMMARY
@@ -120,12 +119,13 @@ jobs:
             result=$(extract_ns "$pattern")
 
             if [ -n "$result" ]; then
-              result_int=${result%.*}
+              # Convert to integer for comparison (handle decimals)
+              result_int=$(echo "$result" | cut -d'.' -f1)
               if [ "$result_int" -gt "$max_ns" ]; then
-                echo "❌ $name: ${result}ns > ${max_ns}ns threshold" >> $GITHUB_STEP_SUMMARY
+                echo "❌ $name: ${result} ns/op > ${max_ns} ns threshold" >> $GITHUB_STEP_SUMMARY
                 FAILED=1
               else
-                echo "✅ $name: ${result}ns <= ${max_ns}ns threshold" >> $GITHUB_STEP_SUMMARY
+                echo "✅ $name: ${result} ns/op <= ${max_ns} ns threshold" >> $GITHUB_STEP_SUMMARY
               fi
             else
               echo "⚠️ $name: Could not extract benchmark result" >> $GITHUB_STEP_SUMMARY
@@ -144,6 +144,10 @@ jobs:
           check_threshold "100 Players Snapshot" "BenchmarkProduceSnapshot_100Players" "$MAX_SNAPSHOT_100_PLAYERS_NS"
 
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Raw Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat benchmark_results.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
           if [ "$FAILED" -eq 1 ]; then
             echo "::error::Performance thresholds exceeded! See summary for details."
@@ -159,7 +163,9 @@ jobs:
         if: always()
         with:
           name: benchmark-results
-          path: fight-club-go/benchmark_results.txt
+          path: |
+            fight-club-go/benchmark_results.txt
+            fight-club-go/benchmark_raw.txt
           retention-days: 30
 
   # ===========================================================================
@@ -190,28 +196,37 @@ jobs:
         run: |
           echo "Running stress test suite..."
           go test -v -run=TestStress -timeout=120s \
-            ./internal/game/... 2>&1 | tee stress_results.txt
+            ./internal/game/... 2>&1 | tee stress_raw.txt
+
+          # Filter to relevant lines only
+          grep -E "(PASS|FAIL|Stress Test|Spike Test|Memory Pressure|TPS:|Avg Tick|Max Tick|--- PASS|--- FAIL)" stress_raw.txt > stress_results.txt || true
 
           echo "=== Stress Test Results ===" >> $GITHUB_STEP_SUMMARY
 
           # Check for failures
-          if grep -q "FAIL" stress_results.txt; then
+          if grep -q "^--- FAIL" stress_raw.txt; then
             echo "::error::Stress tests failed!"
+            echo '```' >> $GITHUB_STEP_SUMMARY
             cat stress_results.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
           echo "### ✅ All stress tests passed!" >> $GITHUB_STEP_SUMMARY
-          grep -E "(PASS|Stress Test Results|Spike Test|Memory Pressure)" stress_results.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat stress_results.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Run latency tests
         working-directory: ./fight-club-go
         run: |
           echo "Running latency tests..."
           go test -v -run=TestLatency -timeout=60s \
-            ./internal/game/... 2>&1 | tee latency_results.txt
+            ./internal/game/... 2>&1 | tee latency_raw.txt
 
-          if grep -q "FAIL" latency_results.txt; then
+          grep -E "(PASS|FAIL|Latency|--- PASS|--- FAIL)" latency_raw.txt > latency_results.txt || true
+
+          if grep -q "^--- FAIL" latency_raw.txt; then
             echo "::error::Latency tests failed!"
             exit 1
           fi
@@ -253,8 +268,13 @@ jobs:
         working-directory: ./fight-club-go
         run: |
           echo "Running memory allocation analysis..."
+          # Use specific package path for memprofile (can't use ... with -memprofile)
           go test -bench=BenchmarkMemoryAllocation -benchmem -memprofile=mem.prof \
-            ./internal/game/... 2>&1 | tee memory_results.txt
+            ./internal/game 2>&1 | tee memory_raw.txt
+
+          # Filter benchmark results only
+          grep -E "^(Benchmark|goos:|goarch:|pkg:|PASS|ok)" memory_raw.txt > memory_results.txt || true
+          grep "B/op" memory_raw.txt >> memory_results.txt || true
 
           echo "## Memory Analysis" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -264,7 +284,8 @@ jobs:
       - name: Check for memory leaks
         working-directory: ./fight-club-go
         run: |
-          go test -v -run=TestStress_MemoryPressure -timeout=60s ./internal/game/...
+          go test -v -run=TestStress_MemoryPressure -timeout=60s ./internal/game/... 2>&1 | \
+            grep -E "(PASS|FAIL|Memory Pressure|Final player count)" || true
 
       - name: Upload memory profile
         uses: actions/upload-artifact@v4
@@ -306,14 +327,14 @@ jobs:
         run: |
           go mod download
           go test -bench=BenchmarkEngineTick -benchmem -benchtime=2s -count=3 \
-            ./internal/game/... 2>&1 | tee ../baseline.txt || true
+            ./internal/game/... 2>&1 | grep -E "^Benchmark.*ns/op" > ../baseline.txt || true
 
       - name: Run PR benchmarks
         working-directory: ./pr/fight-club-go
         run: |
           go mod download
           go test -bench=BenchmarkEngineTick -benchmem -benchtime=2s -count=3 \
-            ./internal/game/... 2>&1 | tee ../pr_results.txt || true
+            ./internal/game/... 2>&1 | grep -E "^Benchmark.*ns/op" > ../pr_results.txt || true
 
       - name: Compare results
         run: |
@@ -321,15 +342,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Baseline (${GITHUB_BASE_REF})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          grep "BenchmarkEngineTick" baseline.txt >> $GITHUB_STEP_SUMMARY || echo "No baseline results" >> $GITHUB_STEP_SUMMARY
+          cat baseline.txt >> $GITHUB_STEP_SUMMARY || echo "No baseline results" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### PR Branch" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          grep "BenchmarkEngineTick" pr_results.txt >> $GITHUB_STEP_SUMMARY || echo "No PR results" >> $GITHUB_STEP_SUMMARY
+          cat pr_results.txt >> $GITHUB_STEP_SUMMARY || echo "No PR results" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
-          # TODO: Add benchstat comparison when benchmark history is established
 
   # ===========================================================================
   # Final Gate: Summary
