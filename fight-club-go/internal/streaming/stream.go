@@ -114,10 +114,10 @@ func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
 		config.Height = 720 // config.DefaultVideo().Height
 	}
 	if config.FPS == 0 {
-		config.FPS = 30 // config.DefaultVideo().FPS
+		config.FPS = 24 // config.DefaultVideo().FPS - reduced for VPS
 	}
 	if config.Bitrate == 0 {
-		config.Bitrate = 6000 // config.DefaultVideo().Bitrate
+		config.Bitrate = 4000 // config.DefaultVideo().Bitrate - reduced for VPS
 	}
 
 	// Pre-allocate frame buffer for performance
