@@ -107,7 +107,7 @@ func (s *Service) SetupRoutesWithOptions(mux *http.ServeMux, baseURL string, loc
 			<!DOCTYPE html>
 			<html>
 			<head><title>Kick Connected</title></head>
-			<body style="font-family: sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white;">
+			<body style="font-family: sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%); color: white;">
 				<h1 style="color: #4ecdc4;">✅ Kick Connected!</h1>
 				<p>You are now authenticated with Kick.</p>
 				<p>Chat commands are now enabled.</p>
