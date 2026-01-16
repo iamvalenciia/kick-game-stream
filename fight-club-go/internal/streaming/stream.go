@@ -391,6 +391,11 @@ func (s *StreamManager) Start() error {
 	s.stopChan = make(chan struct{})
 	s.errors = nil
 
+	// CRITICAL FIX: Start async frame writer to decouple render from FFmpeg
+	// This prevents the render loop from blocking when FFmpeg's pipe is full
+	s.asyncWriter = NewAsyncFrameWriter(s.frameRingBuffer, s.videoPipe)
+	s.asyncWriter.Start(s.config.FPS)
+
 	// Start frame loop (video)
 	go s.frameLoop()
 
