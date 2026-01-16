@@ -31,8 +31,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-w -s
 # ============================================
 FROM alpine:latest
 
-# Install FFmpeg for streaming and ca-certificates for HTTPS
-RUN apk add --no-cache ffmpeg ca-certificates
+# Install FFmpeg for streaming, fonts, and ca-certificates for HTTPS
+RUN apk add --no-cache ffmpeg ca-certificates fontconfig ttf-dejavu ttf-liberation font-noto
 
 # Create non-root user
 RUN addgroup -g 1001 -S appgroup && \
