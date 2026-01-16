@@ -112,8 +112,8 @@ func NewPlayer(name string, opts PlayerOptions) *Player {
 	return &Player{
 		ID:              id,
 		Name:            name,
-		X:               rand.Float64() * 1280,
-		Y:               rand.Float64() * 720,
+		X:               rand.Float64() * 1920,
+		Y:               rand.Float64() * 1080,
 		HP:              100,
 		MaxHP:           100,
 		Money:           0,
