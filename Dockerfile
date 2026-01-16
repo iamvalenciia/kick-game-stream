@@ -1,10 +1,15 @@
 # Fight Club - Go Engine Dockerfile
 # Multi-stage build for production deployment
+# Supports: linux/amd64, linux/arm64 (Oracle Cloud ARM)
 
 # ============================================
 # Stage 1: Build stage
 # ============================================
-FROM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+
+# Build arguments for cross-compilation
+ARG TARGETOS=linux
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -18,8 +23,8 @@ RUN go mod download
 # Copy source code
 COPY fight-club-go/ .
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server
+# Build the binary for target platform
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-w -s" -o server ./cmd/server
 
 # ============================================
 # Stage 2: Production stage
