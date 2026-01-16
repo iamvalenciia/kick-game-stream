@@ -98,8 +98,8 @@ func main() {
 
 	// Create stream manager
 	streamer := streaming.NewStreamManager(engine, streaming.StreamConfig{
-		Width:        1280,
-		Height:       720,
+		Width:        1920,
+		Height:       1080,
 		FPS:          fps,
 		Bitrate:      bitrate,
 		RTMPURL:      rtmpURL,

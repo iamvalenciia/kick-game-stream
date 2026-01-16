@@ -104,18 +104,18 @@ type StreamManager struct {
 
 // NewStreamManager creates a new stream manager
 func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
-	// Set defaults - OPTIMIZED: Use 720p for better performance
+	// Set defaults - 1080p for Kick streaming
 	if config.Width == 0 {
-		config.Width = 1280 // Changed from 1920
+		config.Width = 1920
 	}
 	if config.Height == 0 {
-		config.Height = 720 // Changed from 1080
+		config.Height = 1080
 	}
 	if config.FPS == 0 {
 		config.FPS = 30
 	}
 	if config.Bitrate == 0 {
-		config.Bitrate = 3500 // Lower bitrate for 720p
+		config.Bitrate = 6000 // Higher bitrate for 1080p
 	}
 
 	// Pre-allocate frame buffer for performance
