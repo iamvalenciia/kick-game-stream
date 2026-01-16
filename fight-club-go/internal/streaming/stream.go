@@ -115,7 +115,7 @@ func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
 		config.FPS = 30
 	}
 	if config.Bitrate == 0 {
-		config.Bitrate = 6000 // Higher bitrate for 1080p
+		config.Bitrate = 8000 // Kick recommended for 1080p
 	}
 
 	// Pre-allocate frame buffer for performance
