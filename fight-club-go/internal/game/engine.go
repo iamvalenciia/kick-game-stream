@@ -92,7 +92,7 @@ func NewEngine(tickRate int) *Engine {
 
 	// Cell size 100px for ~500px detection range (covers 5x5 cells)
 	// This balances between too many cells (memory) and too few (clustering)
-	grid := spatial.NewSpatialGrid(1920, 1080, 100, limits.MaxPlayers)
+	grid := spatial.NewSpatialGrid(1280, 720, 100, limits.MaxPlayers)
 
 	return &Engine{
 		players:          make(map[string]*Player),
@@ -105,12 +105,12 @@ func NewEngine(tickRate int) *Engine {
 		spatialGrid:      grid,
 		playerSlice:      make([]*Player, 0, limits.MaxPlayers),
 		sap:              spatial.NewSweepAndPrune(limits.MaxPlayers),
-		flowFieldManager: spatial.NewFlowFieldManager(1920, 1080, 50), // 50px cells for smoother nav
+		flowFieldManager: spatial.NewFlowFieldManager(1280, 720, 50), // 50px cells for smoother nav
 		comboDefinitions: DefaultComboDefinitions(),
 		tickRate:         tickRate,
 		stopChan:         make(chan struct{}),
-		worldWidth:       1920,
-		worldHeight:      1080,
+		worldWidth:       1280,
+		worldHeight:      720,
 		limits:           limits,
 		snapshotPool:     NewSnapshotPool(limits),
 		eventLog:         NewEventLog(),
