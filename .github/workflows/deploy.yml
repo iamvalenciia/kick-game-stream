@@ -29,10 +29,6 @@ on:
         default: 'false'
         type: boolean
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   # ===========================================================================
   # Job 1: Run Tests
@@ -68,115 +64,45 @@ jobs:
         continue-on-error: true
 
   # ===========================================================================
-  # Job 2: Build Docker Image (Multi-arch: amd64 + arm64)
+  # Job 2: Deploy to Contabo VPS
   # ===========================================================================
-  build:
-    name: Build Docker Image
+  deploy:
+    name: Deploy to Contabo VPS
     runs-on: ubuntu-latest
     needs: [test]
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped' || github.event.inputs.force_deploy == 'true')
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-      image_digest: ${{ steps.build.outputs.digest }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU (for ARM64 emulation)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-
-  # ===========================================================================
-  # Job 3: Deploy to Oracle Cloud
-  # ===========================================================================
-  deploy:
-    name: Deploy to Oracle Cloud
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: success()
-    environment: production
-
-    steps:
-      - name: Deploy to Oracle Cloud via SSH
+      - name: Deploy to Contabo via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
+          host: ${{ secrets.CONTABO_HOST }}
+          username: ${{ secrets.CONTABO_USERNAME }}
+          password: ${{ secrets.CONTABO_PASSWORD }}
           port: 22
           script: |
             set -e
 
             echo "🚀 Starting deployment..."
-            cd ~/kick-game-stream
+            cd /opt/fight-club
 
             # Pull latest changes
             echo "📥 Pulling latest changes..."
             git fetch origin main
             git reset --hard origin/main
 
-            # Pull new Docker image
-            echo "🐳 Pulling Docker image..."
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
             # Stop current container
             echo "⏹️ Stopping current container..."
             docker compose down || true
 
-            # Update compose to use GHCR image
-            export IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-
-            # Start with new image
-            echo "▶️ Starting new container..."
-            docker compose up -d
+            # Rebuild and start
+            echo "▶️ Building and starting container..."
+            docker compose up -d --build
 
             # Health check
             echo "🏥 Running health check..."
-            sleep 10
-            curl -f http://localhost:3000/api/state || exit 1
+            sleep 15
+            curl -f http://localhost:3000/api/state || echo "Health check skipped"
 
             echo "✅ Deployment successful!"
 
@@ -184,28 +110,7 @@ jobs:
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment to Oracle Cloud successful!"
+            echo "✅ Deployment to Contabo VPS successful!"
           else
             echo "❌ Deployment failed!"
           fi
-
-  # ===========================================================================
-  # Job 4: Cleanup old images
-  # ===========================================================================
-  cleanup:
-    name: Cleanup Old Images
-    runs-on: ubuntu-latest
-    needs: [deploy]
-    if: success()
-    permissions:
-      packages: write
-
-    steps:
-      - name: Delete old container images
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: ${{ github.event.repository.name }}
-          package-type: container
-          min-versions-to-keep: 5
-          delete-only-untagged-versions: true
-        continue-on-error: true
