@@ -44,7 +44,7 @@ func main() {
 	// Stream config
 	port := getEnvWithDefault("PORT", "3000")
 	fps := getEnvInt("STREAM_FPS", 30)
-	bitrate := getEnvInt("STREAM_BITRATE", 4500)
+	bitrate := getEnvInt("STREAM_BITRATE", 8000)
 	tickRate := getEnvInt("GAME_TICK_RATE", 30)
 
 	// Kick RTMP URL
