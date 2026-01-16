@@ -25,7 +25,7 @@ services:
       - MAX_PLAYERS=100
       - GAME_TICK_RATE=30
       - STREAM_FPS=30
-      - STREAM_BITRATE=${STREAM_BITRATE:-8000}
+      - STREAM_BITRATE=${STREAM_BITRATE:-6000}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/state"]
