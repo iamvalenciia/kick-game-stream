@@ -996,3 +996,37 @@ func (s *Service) InvalidateChatroomID() {
 	s.chatroomID = 0
 	log.Println("⚠️ Chatroom ID invalidated due to API error")
 }
+
+// GetUserID returns the authenticated user's ID
+func (s *Service) GetUserID() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userID
+}
+
+// GetBroadcasterID returns the broadcaster ID
+func (s *Service) GetBroadcasterID() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.broadcasterID
+}
+
+// AuthInfo contains information about the authenticated user
+type AuthInfo struct {
+	UserID        int64  `json:"user_id"`
+	BroadcasterID int64  `json:"broadcaster_id"`
+	Username      string `json:"username"`
+	IsConnected   bool   `json:"is_connected"`
+}
+
+// GetAuthInfo returns authentication info for the current user
+func (s *Service) GetAuthInfo() AuthInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return AuthInfo{
+		UserID:        s.userID,
+		BroadcasterID: s.broadcasterID,
+		Username:      s.broadcasterSlug,
+		IsConnected:   s.isConnected,
+	}
+}

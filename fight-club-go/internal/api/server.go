@@ -34,6 +34,11 @@ func NewServer(engine *game.Engine, streamer *streaming.StreamManager) *Server {
 
 // NewServerWithKick creates a new API server with Kick OAuth support.
 func NewServerWithKick(engine *game.Engine, streamer *streaming.StreamManager, kickHandler http.Handler) *Server {
+	return NewServerWithKickAndAuth(engine, streamer, kickHandler, nil, false)
+}
+
+// NewServerWithKickAndAuth creates a new API server with Kick OAuth and admin authentication support.
+func NewServerWithKickAndAuth(engine *game.Engine, streamer *streaming.StreamManager, kickHandler http.Handler, sessionMgr *SessionManager, enableAuth bool) *Server {
 	s := &Server{
 		engine:      engine,
 		streamer:    streamer,
@@ -50,6 +55,8 @@ func NewServerWithKick(engine *game.Engine, streamer *streaming.StreamManager, k
 		Streamer:           streamer,
 		RateLimiter:        s.rateLimiter,
 		KickWebhookHandler: kickHandler,
+		SessionManager:     sessionMgr,
+		EnableAdminAuth:    enableAuth,
 	})
 
 	// Add WebSocket routes (these need the wsHub instance)
