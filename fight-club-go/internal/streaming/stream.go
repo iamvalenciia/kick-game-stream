@@ -103,19 +103,21 @@ type StreamManager struct {
 }
 
 // NewStreamManager creates a new stream manager
+// Note: Config should come from config.Load() in main.go (SSOT).
+// Fallback defaults here match config.DefaultVideo() for safety.
 func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
-	// Set defaults - 720p for smooth streaming on VPS
+	// Fallback defaults match config.DefaultVideo() - 720p for smooth VPS streaming
 	if config.Width == 0 {
-		config.Width = 1280
+		config.Width = 1280 // config.DefaultVideo().Width
 	}
 	if config.Height == 0 {
-		config.Height = 720
+		config.Height = 720 // config.DefaultVideo().Height
 	}
 	if config.FPS == 0 {
-		config.FPS = 30
+		config.FPS = 30 // config.DefaultVideo().FPS
 	}
 	if config.Bitrate == 0 {
-		config.Bitrate = 6000 // Good quality for 720p
+		config.Bitrate = 6000 // config.DefaultVideo().Bitrate
 	}
 
 	// Pre-allocate frame buffer for performance

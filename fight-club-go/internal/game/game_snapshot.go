@@ -3,29 +3,15 @@ package game
 import (
 	"sync/atomic"
 	"time"
+
+	"fight-club/internal/config"
 )
 
-// ResourceLimits defines hard caps to prevent DoS attacks
-type ResourceLimits struct {
-	MaxTotalPlayers int // Hard cap on total connected players (logic)
-	MaxPlayers      int // Hard cap on rendered players (snapshot)
-	MaxParticles    int // Per frame particle limit
-	MaxEffects      int // Per frame effect limit
-	MaxTexts        int // Per frame floating text limit
-	MaxTrails       int // Per frame weapon trail limit
-	MaxFlashes      int // Per frame impact flash limit
-}
+// ResourceLimits is an alias for config.ResourceLimits (SSOT)
+type ResourceLimits = config.ResourceLimits
 
-// DefaultLimits provides production-safe default limits
-var DefaultLimits = ResourceLimits{
-	MaxTotalPlayers: 1000000,
-	MaxPlayers:      200,
-	MaxParticles:    200, // Reduced from 500
-	MaxEffects:      20,  // Reduced from 100 - prevents arc accumulation
-	MaxTexts:        30,  // Reduced from 50
-	MaxTrails:       20,  // Reduced from 50
-	MaxFlashes:      10,  // Reduced from 30 - prevents flash accumulation
-}
+// DefaultLimits provides production-safe default limits (SSOT from config)
+var DefaultLimits = config.DefaultLimits()
 
 // PlayerSnapshot is an immutable copy of player state for rendering
 // Uses value types (not pointers) to ensure immutability

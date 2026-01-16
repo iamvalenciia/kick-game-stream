@@ -85,14 +85,37 @@ type Engine struct {
 	arenaBotName        string
 }
 
-// NewEngine creates a new game engine with DoS-resilient defaults
-func NewEngine(tickRate int) *Engine {
-	limits := DefaultLimits
+// EngineConfig holds configuration for the game engine
+type EngineConfig struct {
+	TickRate    int
+	WorldWidth  int
+	WorldHeight int
+	Limits      ResourceLimits
+}
+
+// NewEngine creates a new game engine with the provided configuration.
+// Use DefaultEngineConfig() for sensible defaults, or pass custom values from config.Load().
+func NewEngine(cfg EngineConfig) *Engine {
+	// Apply defaults if not set
+	if cfg.WorldWidth == 0 {
+		cfg.WorldWidth = 1280
+	}
+	if cfg.WorldHeight == 0 {
+		cfg.WorldHeight = 720
+	}
+	if cfg.TickRate == 0 {
+		cfg.TickRate = 30
+	}
+	if cfg.Limits.MaxPlayers == 0 {
+		cfg.Limits = DefaultLimits
+	}
+
+	limits := cfg.Limits
 	seed := time.Now().UnixNano()
 
 	// Cell size 100px for ~500px detection range (covers 5x5 cells)
 	// This balances between too many cells (memory) and too few (clustering)
-	grid := spatial.NewSpatialGrid(1280, 720, 100, limits.MaxPlayers)
+	grid := spatial.NewSpatialGrid(cfg.WorldWidth, cfg.WorldHeight, 100, limits.MaxPlayers)
 
 	return &Engine{
 		players:          make(map[string]*Player),
@@ -105,12 +128,12 @@ func NewEngine(tickRate int) *Engine {
 		spatialGrid:      grid,
 		playerSlice:      make([]*Player, 0, limits.MaxPlayers),
 		sap:              spatial.NewSweepAndPrune(limits.MaxPlayers),
-		flowFieldManager: spatial.NewFlowFieldManager(1280, 720, 50), // 50px cells for smoother nav
+		flowFieldManager: spatial.NewFlowFieldManager(cfg.WorldWidth, cfg.WorldHeight, 50), // 50px cells for smoother nav
 		comboDefinitions: DefaultComboDefinitions(),
-		tickRate:         tickRate,
+		tickRate:         cfg.TickRate,
 		stopChan:         make(chan struct{}),
-		worldWidth:       1280,
-		worldHeight:      720,
+		worldWidth:       float64(cfg.WorldWidth),
+		worldHeight:      float64(cfg.WorldHeight),
 		limits:           limits,
 		snapshotPool:     NewSnapshotPool(limits),
 		eventLog:         NewEventLog(),
@@ -119,6 +142,16 @@ func NewEngine(tickRate int) *Engine {
 		teamManager:      NewTeamManager(),
 		arenaBotEnabled:  true,
 		arenaBotName:     "Arena-Bot",
+	}
+}
+
+// DefaultEngineConfig returns a sensible default configuration
+func DefaultEngineConfig() EngineConfig {
+	return EngineConfig{
+		TickRate:    30,
+		WorldWidth:  1280,
+		WorldHeight: 720,
+		Limits:      DefaultLimits,
 	}
 }
 
@@ -271,6 +304,9 @@ func (e *Engine) AddPlayer(name string, opts PlayerOptions) *Player {
 	}
 
 	// Create new player with deterministic spawn position
+	// Pass world bounds so player can use them for movement/respawn
+	opts.WorldWidth = e.worldWidth
+	opts.WorldHeight = e.worldHeight
 	player := NewPlayer(name, opts)
 	player.X = e.rng.Float64()*e.worldWidth*0.8 + e.worldWidth*0.1
 	player.Y = e.rng.Float64()*e.worldHeight*0.8 + e.worldHeight*0.1
@@ -1131,7 +1167,9 @@ func (e *Engine) updateArenaBot(deltaTime float64) {
 // spawnArenaBot creates the permanent arena bot
 func (e *Engine) spawnArenaBot() {
 	bot := NewPlayer(e.arenaBotName, PlayerOptions{
-		Color: "#ff0000", // Red color for the arena bot
+		Color:       "#ff0000", // Red color for the arena bot
+		WorldWidth:  e.worldWidth,
+		WorldHeight: e.worldHeight,
 	})
 	bot.X = e.rng.Float64()*e.worldWidth*0.8 + e.worldWidth*0.1
 	bot.Y = e.rng.Float64()*e.worldHeight*0.8 + e.worldHeight*0.1
