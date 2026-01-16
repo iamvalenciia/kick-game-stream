@@ -3,7 +3,19 @@ package game
 import (
 	"testing"
 	"time"
+
+	"fight-club/internal/config"
 )
+
+// helper to create a test engine with defaults
+func newTestEngine(tickRate int) *Engine {
+	return NewEngine(EngineConfig{
+		TickRate:    tickRate,
+		WorldWidth:  1280,
+		WorldHeight: 720,
+		Limits:      config.DefaultLimits(),
+	})
+}
 
 // TestNewEngine verifies engine creation with correct defaults
 func TestNewEngine(t *testing.T) {
@@ -18,7 +30,7 @@ func TestNewEngine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngine(tt.tickRate)
+			engine := newTestEngine(tt.tickRate)
 			if engine == nil {
 				t.Fatal("NewEngine returned nil")
 			}
@@ -28,7 +40,7 @@ func TestNewEngine(t *testing.T) {
 
 // TestEngineStartStop verifies engine can start and stop without panics
 func TestEngineStartStop(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	// Start engine
 	engine.Start()
@@ -43,7 +55,7 @@ func TestEngineStartStop(t *testing.T) {
 
 // TestAddPlayer tests adding players to the engine
 func TestAddPlayer(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	// Add first player
 	player1 := engine.AddPlayer("Player1", PlayerOptions{})
@@ -75,7 +87,7 @@ func TestAddPlayer(t *testing.T) {
 
 // TestRemovePlayer tests player removal
 func TestRemovePlayer(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	engine.AddPlayer("TestPlayer", PlayerOptions{})
 
@@ -98,7 +110,7 @@ func TestRemovePlayer(t *testing.T) {
 
 // TestGetPlayer tests player retrieval
 func TestGetPlayer(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	// Non-existent player
 	if engine.GetPlayer("Nobody") != nil {
@@ -115,7 +127,7 @@ func TestGetPlayer(t *testing.T) {
 
 // TestHealPlayer tests player healing
 func TestHealPlayer(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	player := engine.AddPlayer("TestPlayer", PlayerOptions{})
 
@@ -146,7 +158,7 @@ func TestHealPlayer(t *testing.T) {
 
 // TestGetState tests game state retrieval
 func TestGetState(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	// Empty state
 	state := engine.GetState()
@@ -169,7 +181,7 @@ func TestGetState(t *testing.T) {
 
 // TestProcessAttack tests attack processing
 func TestProcessAttack(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	attacker := engine.AddPlayer("Attacker", PlayerOptions{})
 	victim := engine.AddPlayer("Victim", PlayerOptions{})
@@ -199,7 +211,7 @@ func TestProcessAttack(t *testing.T) {
 
 // TestProcessAttackKill tests kill processing
 func TestProcessAttackKill(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	attacker := engine.AddPlayer("Attacker", PlayerOptions{})
 	victim := engine.AddPlayer("Victim", PlayerOptions{})
@@ -236,7 +248,7 @@ func TestProcessAttackKill(t *testing.T) {
 
 // TestAttackWithSpawnProtection tests that spawn protection blocks attacks
 func TestAttackWithSpawnProtection(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	attacker := engine.AddPlayer("Attacker", PlayerOptions{})
 	victim := engine.AddPlayer("Victim", PlayerOptions{})
@@ -255,7 +267,7 @@ func TestAttackWithSpawnProtection(t *testing.T) {
 
 // TestSetCallbacks tests callback registration
 func TestSetCallbacks(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 
 	joinCalled := false
 
@@ -277,7 +289,7 @@ func TestSetCallbacks(t *testing.T) {
 
 // TestConcurrentAccess tests thread safety
 func TestConcurrentAccess(t *testing.T) {
-	engine := NewEngine(30)
+	engine := newTestEngine(30)
 	engine.Start()
 	defer engine.Stop()
 
