@@ -2,6 +2,8 @@ package game
 
 import (
 	"testing"
+
+	"fight-club/internal/config"
 )
 
 // TestNewPlayer tests player creation with defaults
@@ -173,7 +175,12 @@ func TestPlayerToJSON(t *testing.T) {
 
 // TestPlayerUpdate tests player update with no target
 func TestPlayerUpdate(t *testing.T) {
-	engine := NewEngine(30)
+	engine := NewEngine(EngineConfig{
+		TickRate:    30,
+		WorldWidth:  1280,
+		WorldHeight: 720,
+		Limits:      config.DefaultLimits(),
+	})
 	player := NewPlayer("TestPlayer", PlayerOptions{})
 	player.SpawnProtection = false
 
