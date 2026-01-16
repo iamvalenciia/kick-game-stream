@@ -1,0 +1,70 @@
+# =============================================================================
+# Fight Club - Production Docker Compose (Oracle Cloud)
+# =============================================================================
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# Uses pre-built images from GitHub Container Registry (GHCR)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  game-server:
+    # Use image from GitHub Container Registry
+    # Replace with your actual image path after first deploy
+    image: ${IMAGE_TAG:-ghcr.io/iamvalenciia/kick-game-stream:latest}
+    container_name: fight-club-game-server
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STREAM_KEY_KICK=${STREAM_KEY_KICK}
+      - CLIENT_ID_KICK=${CLIENT_ID_KICK}
+      - CLIENT_SECRET_KICK=${CLIENT_SECRET_KICK}
+      - KICK_BROADCASTER_USER_ID=${KICK_BROADCASTER_USER_ID}
+      - PUBLIC_URL=${PUBLIC_URL}
+      - REDIS_PUBLIC_ENDPOINT=${REDIS_PUBLIC_ENDPOINT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - MONGODB_CLUSTER_USERNAME=${MONGODB_CLUSTER_USERNAME}
+      - MONGODB_CLUSTER_PASSWORD=${MONGODB_CLUSTER_PASSWORD}
+      - MAX_PLAYERS=${MAX_PLAYERS:-100}
+      - GAME_TICK_RATE=${GAME_TICK_RATE:-30}
+      - STREAM_FPS=${STREAM_FPS:-30}
+      - STREAM_BITRATE=${STREAM_BITRATE:-4500}
+      - MUSIC_ENABLED=${MUSIC_ENABLED:-true}
+      - MUSIC_VOLUME=${MUSIC_VOLUME:-0.15}
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/state"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '3.5'
+          memory: 20G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  # Watchtower for automatic updates (optional)
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.docker/config.json:/config.json:ro
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_REVIVE_STOPPED=false
+    restart: unless-stopped
+    profiles:
+      - auto-update
