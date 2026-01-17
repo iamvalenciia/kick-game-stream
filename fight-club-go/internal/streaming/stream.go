@@ -100,6 +100,12 @@ type StreamManager struct {
 	prevAttackingPlayers map[string]bool // Track who was attacking last frame
 	prevAlivePlayers     map[string]bool // Track who was alive last frame
 	prevTotalKills       int             // Track total kills last frame
+
+	// Auto-reconnection
+	reconnectAttempts int32         // atomic - number of reconnection attempts
+	reconnecting      int32         // atomic - flag to prevent concurrent reconnection
+	maxReconnects     int           // maximum reconnection attempts (0 = unlimited)
+	reconnectBaseDelay time.Duration // base delay for exponential backoff
 }
 
 // NewStreamManager creates a new stream manager
@@ -167,6 +173,9 @@ func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
 		prevAttackingPlayers: make(map[string]bool),
 		prevAlivePlayers:     make(map[string]bool),
 		prevTotalKills:       0,
+		// Auto-reconnection settings
+		maxReconnects:      10,                    // Max 10 reconnection attempts
+		reconnectBaseDelay: 2 * time.Second,      // Start with 2 second delay
 	}
 
 	// REAL-TIME FIX: Load fonts once at startup (not per-frame)
@@ -394,6 +403,12 @@ func (s *StreamManager) Start() error {
 	// CRITICAL FIX: Start async frame writer to decouple render from FFmpeg
 	// This prevents the render loop from blocking when FFmpeg's pipe is full
 	s.asyncWriter = NewAsyncFrameWriter(s.frameRingBuffer, s.videoPipe)
+
+	// Set up auto-reconnection callback
+	s.asyncWriter.SetOnConnectionLost(func() {
+		go s.handleConnectionLost()
+	})
+
 	s.asyncWriter.Start(s.config.FPS)
 
 	// Start frame loop (video)
@@ -477,6 +492,149 @@ func (s *StreamManager) Stop() {
 	log.Println("✅ Stream stopped")
 }
 
+// handleConnectionLost is called when the AsyncFrameWriter detects connection loss
+// It initiates automatic reconnection with exponential backoff
+func (s *StreamManager) handleConnectionLost() {
+	// Prevent concurrent reconnection attempts
+	if !atomic.CompareAndSwapInt32(&s.reconnecting, 0, 1) {
+		log.Println("⚠️ Reconnection already in progress, skipping")
+		return
+	}
+	defer atomic.StoreInt32(&s.reconnecting, 0)
+
+	attempt := atomic.AddInt32(&s.reconnectAttempts, 1)
+
+	// Check if we've exceeded max reconnection attempts
+	if s.maxReconnects > 0 && int(attempt) > s.maxReconnects {
+		log.Printf("❌ Max reconnection attempts (%d) exceeded. Manual restart required.", s.maxReconnects)
+		return
+	}
+
+	// Calculate exponential backoff delay (2s, 4s, 8s, 16s, 32s, capped at 60s)
+	delay := s.reconnectBaseDelay * time.Duration(1<<uint(attempt-1))
+	maxDelay := 60 * time.Second
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	log.Printf("🔄 Stream connection lost. Reconnecting in %v (attempt %d/%d)...",
+		delay, attempt, s.maxReconnects)
+
+	// Wait before reconnecting
+	time.Sleep(delay)
+
+	// Check if we were manually stopped during the wait
+	s.mu.RLock()
+	stillStreaming := s.streaming
+	s.mu.RUnlock()
+
+	if !stillStreaming {
+		log.Println("⚠️ Stream was manually stopped during reconnection wait")
+		return
+	}
+
+	// Attempt to restart
+	if err := s.Restart(); err != nil {
+		log.Printf("❌ Reconnection attempt %d failed: %v", attempt, err)
+		// Try again recursively (will be subject to exponential backoff)
+		s.handleConnectionLost()
+	} else {
+		// Success! Reset attempt counter
+		atomic.StoreInt32(&s.reconnectAttempts, 0)
+		log.Printf("✅ Stream reconnected successfully after %d attempts", attempt)
+	}
+}
+
+// Restart stops the current stream and starts a new one
+// This is used for automatic reconnection after connection loss
+func (s *StreamManager) Restart() error {
+	log.Println("🔄 Restarting stream...")
+
+	// Stop current stream (but keep the streaming flag true for reconnection)
+	s.stopInternal()
+
+	// Small delay to ensure clean shutdown
+	time.Sleep(500 * time.Millisecond)
+
+	// Start new stream
+	return s.Start()
+}
+
+// stopInternal stops the stream internals without setting streaming to false
+// Used during reconnection to preserve the streaming state
+func (s *StreamManager) stopInternal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	log.Println("🛑 Stopping stream internals for restart...")
+
+	// Signal loops to stop
+	select {
+	case <-s.stopChan:
+		// Already closed
+	default:
+		close(s.stopChan)
+	}
+
+	// Stop async writer first (before closing pipes)
+	if s.asyncWriter != nil {
+		s.asyncWriter.Stop()
+	}
+
+	// Close pipes to unblock any reads
+	if s.videoPipe != nil {
+		s.videoPipe.Close()
+		s.videoPipe = nil
+	}
+	if s.audioPipe != nil {
+		s.audioPipe.Close()
+		s.audioPipe = nil
+	}
+
+	// Kill FFmpeg process and all its children
+	if s.ffmpeg != nil && s.ffmpeg.Process != nil {
+		pid := s.ffmpeg.Process.Pid
+		log.Printf("🔪 Killing FFmpeg process (PID: %d) for restart...", pid)
+
+		// Use platform-specific kill function
+		killFFmpegProcess(s.ffmpeg, pid)
+
+		// Brief wait for process to terminate
+		done := make(chan error, 1)
+		go func() {
+			done <- s.ffmpeg.Wait()
+		}()
+
+		select {
+		case <-done:
+			log.Println("✅ FFmpeg process terminated for restart")
+		case <-time.After(2 * time.Second):
+			log.Println("⚠️ Timed out waiting for FFmpeg termination")
+		}
+
+		s.ffmpeg = nil
+	}
+
+	// Mark as not streaming so Start() can proceed
+	s.streaming = false
+}
+
+// ResetReconnectAttempts resets the reconnection attempt counter
+// Call this after a successful manual start
+func (s *StreamManager) ResetReconnectAttempts() {
+	atomic.StoreInt32(&s.reconnectAttempts, 0)
+}
+
+// GetReconnectAttempts returns the current number of reconnection attempts
+func (s *StreamManager) GetReconnectAttempts() int32 {
+	return atomic.LoadInt32(&s.reconnectAttempts)
+}
+
+// IsReconnecting returns whether a reconnection is in progress
+func (s *StreamManager) IsReconnecting() bool {
+	return atomic.LoadInt32(&s.reconnecting) == 1
+}
+
 // IsStreaming returns whether the stream is active
 func (s *StreamManager) IsStreaming() bool {
 	s.mu.RLock()
@@ -500,16 +658,27 @@ func (s *StreamManager) GetStats() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
-		"streaming":  s.streaming,
-		"framesSent": framesSent,
-		"uptime":     uptime.String(),
-		"actualFps":  fmt.Sprintf("%.1f", actualFPS),
-		"resolution": fmt.Sprintf("%dx%d", s.config.Width, s.config.Height),
-		"fps":        s.config.FPS,
-		"bitrate":    s.config.Bitrate,
-		"errors":     s.errors,
+	stats := map[string]interface{}{
+		"streaming":          s.streaming,
+		"framesSent":         framesSent,
+		"uptime":             uptime.String(),
+		"actualFps":          fmt.Sprintf("%.1f", actualFPS),
+		"resolution":         fmt.Sprintf("%dx%d", s.config.Width, s.config.Height),
+		"fps":                s.config.FPS,
+		"bitrate":            s.config.Bitrate,
+		"errors":             s.errors,
+		"reconnecting":       atomic.LoadInt32(&s.reconnecting) == 1,
+		"reconnectAttempts":  atomic.LoadInt32(&s.reconnectAttempts),
 	}
+
+	// Add async writer stats if available
+	if s.asyncWriter != nil {
+		writerStats := s.asyncWriter.GetStats()
+		stats["connectionLost"] = writerStats["connectionLost"]
+		stats["consecutiveErrors"] = writerStats["consecutiveErrors"]
+	}
+
+	return stats
 }
 
 func (s *StreamManager) frameLoop() {
