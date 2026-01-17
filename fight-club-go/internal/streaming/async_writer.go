@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+const (
+	// MaxConsecutiveErrors before triggering connection lost callback
+	MaxConsecutiveErrors = 10
+	// ErrorResetInterval - reset error count if no errors for this duration
+	ErrorResetInterval = 5 * time.Second
+)
+
 // AsyncFrameWriter handles non-blocking frame delivery to FFmpeg.
 // It reads frames from a ring buffer and writes them to FFmpeg's stdin pipe.
 // This isolates the render loop from FFmpeg backpressure.
@@ -23,6 +30,13 @@ type AsyncFrameWriter struct {
 	writeErrors    uint64
 	lastWriteTime  time.Time
 	avgWriteTimeNs int64
+
+	// Connection health tracking
+	consecutiveErrors int32          // atomic - consecutive write failures
+	lastErrorTime     time.Time      // time of last error
+	connectionLost    int32          // atomic - flag indicating connection is lost
+	onConnectionLost  func()         // callback when connection is determined lost
+	mu                sync.RWMutex   // protects callback and lastErrorTime
 }
 
 // NewAsyncFrameWriter creates a new async frame writer.
@@ -34,12 +48,29 @@ func NewAsyncFrameWriter(ringBuffer *FrameRingBuffer, pipe io.WriteCloser) *Asyn
 	}
 }
 
+// SetOnConnectionLost sets a callback that will be called when the connection
+// is determined to be lost (after MaxConsecutiveErrors consecutive write failures).
+func (w *AsyncFrameWriter) SetOnConnectionLost(callback func()) {
+	w.mu.Lock()
+	w.onConnectionLost = callback
+	w.mu.Unlock()
+}
+
+// IsConnectionLost returns true if the connection has been determined to be lost.
+func (w *AsyncFrameWriter) IsConnectionLost() bool {
+	return atomic.LoadInt32(&w.connectionLost) == 1
+}
+
 // Start begins the async writer goroutine.
 // It pulls frames from the ring buffer and writes them to FFmpeg at a steady rate.
 func (w *AsyncFrameWriter) Start(fps int) {
 	if !atomic.CompareAndSwapInt32(&w.running, 0, 1) {
 		return // Already running
 	}
+
+	// Reset connection state
+	atomic.StoreInt32(&w.connectionLost, 0)
+	atomic.StoreInt32(&w.consecutiveErrors, 0)
 
 	w.stopChan = make(chan struct{})
 	w.wg.Add(1)
@@ -63,6 +94,11 @@ func (w *AsyncFrameWriter) Start(fps int) {
 				log.Println("📡 AsyncFrameWriter stopping...")
 				return
 			case <-ticker.C:
+				// Skip processing if connection is already lost
+				if atomic.LoadInt32(&w.connectionLost) == 1 {
+					continue
+				}
+
 				frame := w.ringBuffer.TryRead()
 				if frame == nil {
 					consecutiveEmpty++
@@ -81,11 +117,47 @@ func (w *AsyncFrameWriter) Start(fps int) {
 
 				if err != nil {
 					atomic.AddUint64(&w.writeErrors, 1)
-					// Don't log every error, just track them
-					if atomic.LoadUint64(&w.writeErrors) <= 5 {
-						log.Printf("❌ AsyncFrameWriter write error: %v", err)
+					errCount := atomic.AddInt32(&w.consecutiveErrors, 1)
+
+					// Log first few errors
+					if errCount <= 5 {
+						log.Printf("❌ AsyncFrameWriter write error (%d/%d): %v", errCount, MaxConsecutiveErrors, err)
+					}
+
+					// Update last error time
+					w.mu.Lock()
+					w.lastErrorTime = time.Now()
+					w.mu.Unlock()
+
+					// Check if we've hit the threshold for connection lost
+					if errCount >= MaxConsecutiveErrors {
+						if atomic.CompareAndSwapInt32(&w.connectionLost, 0, 1) {
+							log.Printf("🔴 Connection lost detected after %d consecutive errors", errCount)
+
+							// Trigger callback in separate goroutine to avoid blocking
+							w.mu.RLock()
+							callback := w.onConnectionLost
+							w.mu.RUnlock()
+
+							if callback != nil {
+								go callback()
+							}
+						}
 					}
 					continue
+				}
+
+				// Successful write - reset consecutive error counter
+				// Only reset if there were errors and enough time has passed
+				if atomic.LoadInt32(&w.consecutiveErrors) > 0 {
+					w.mu.RLock()
+					lastErr := w.lastErrorTime
+					w.mu.RUnlock()
+
+					if time.Since(lastErr) > ErrorResetInterval {
+						atomic.StoreInt32(&w.consecutiveErrors, 0)
+						log.Println("✅ Connection recovered - error counter reset")
+					}
 				}
 
 				atomic.AddUint64(&w.framesWritten, 1)
@@ -127,12 +199,14 @@ func (w *AsyncFrameWriter) GetStats() map[string]interface{} {
 	bufWritten, bufDropped, bufRead := w.ringBuffer.GetStats()
 
 	return map[string]interface{}{
-		"framesWritten":   atomic.LoadUint64(&w.framesWritten),
-		"writeErrors":     atomic.LoadUint64(&w.writeErrors),
-		"avgWriteTimeMs":  float64(atomic.LoadInt64(&w.avgWriteTimeNs)) / 1e6,
-		"bufferAvailable": w.ringBuffer.Available(),
-		"bufferWritten":   bufWritten,
-		"bufferDropped":   bufDropped,
-		"bufferRead":      bufRead,
+		"framesWritten":     atomic.LoadUint64(&w.framesWritten),
+		"writeErrors":       atomic.LoadUint64(&w.writeErrors),
+		"consecutiveErrors": atomic.LoadInt32(&w.consecutiveErrors),
+		"connectionLost":    atomic.LoadInt32(&w.connectionLost) == 1,
+		"avgWriteTimeMs":    float64(atomic.LoadInt64(&w.avgWriteTimeNs)) / 1e6,
+		"bufferAvailable":   w.ringBuffer.Available(),
+		"bufferWritten":     bufWritten,
+		"bufferDropped":     bufDropped,
+		"bufferRead":        bufRead,
 	}
 }
