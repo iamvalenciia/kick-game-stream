@@ -38,7 +38,8 @@ type StreamConfig struct {
 	MusicPath    string
 
 	// Hardware encoding configuration
-	UseNVENC bool // Use NVIDIA NVENC hardware encoder (requires NVIDIA GPU)
+	UseNVENC   bool // Use NVIDIA NVENC hardware encoder (requires NVIDIA GPU)
+	ForceNVENC bool // Skip NVENC availability check and force usage (use if test fails but you have NVENC)
 }
 
 // DoubleBuffer provides non-blocking frame buffering
@@ -252,17 +253,27 @@ func (s *StreamManager) OnStreamStart(callback func()) {
 // checkNVENCAvailable tests if NVIDIA NVENC hardware encoder is available
 // by running a quick FFmpeg test encode
 func checkNVENCAvailable() bool {
-	// Quick test: try to initialize NVENC encoder
+	// Quick test: try to initialize NVENC encoder with a minimal test
+	// Using color source instead of nullsrc for better Windows compatibility
 	cmd := exec.Command("ffmpeg",
+		"-y",                    // Overwrite output
 		"-f", "lavfi",
-		"-i", "nullsrc=s=64x64:d=0.1",
+		"-i", "color=c=black:s=64x64:d=0.1:r=30",
 		"-c:v", "h264_nvenc",
+		"-preset", "p1",         // Fastest preset
+		"-frames:v", "1",        // Only encode 1 frame
 		"-f", "null",
 		"-",
 	)
+
+	// Capture stderr for debugging (but don't block on it)
 	cmd.Stderr = nil
 	cmd.Stdout = nil
+
 	err := cmd.Run()
+	if err != nil {
+		log.Printf("   ℹ️ NVENC test failed: %v (this is normal if no NVIDIA GPU)", err)
+	}
 	return err == nil
 }
 
@@ -285,12 +296,17 @@ func (s *StreamManager) Start() error {
 
 	// Determine encoder: NVENC (GPU) vs libx264 (CPU)
 	useNVENC := false
-	if s.config.UseNVENC {
+	if s.config.ForceNVENC {
+		// Force NVENC without checking - user knows they have it
+		useNVENC = true
+		log.Println("   🎥 Using NVENC GPU hardware encoding (FORCED - skipping availability check)")
+	} else if s.config.UseNVENC {
 		if checkNVENCAvailable() {
 			useNVENC = true
 			log.Println("   🎥 Using NVENC GPU hardware encoding (NVIDIA)")
 		} else {
 			log.Println("   ⚠️ NVENC requested but not available, falling back to libx264 CPU")
+			log.Println("   💡 Tip: If you're sure you have NVENC, try FORCE_NVENC=true to skip the test")
 		}
 	}
 	if !useNVENC {

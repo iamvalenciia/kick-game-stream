@@ -105,8 +105,10 @@ func main() {
 
 	// Hardware encoding configuration
 	// USE_NVENC=true enables NVIDIA GPU hardware encoding (requires NVIDIA GPU with NVENC support)
+	// FORCE_NVENC=true skips the availability check and forces NVENC (use if test fails but you have NVENC)
 	// This significantly reduces CPU usage and improves streaming performance
 	useNVENC := os.Getenv("USE_NVENC") == "true"
+	forceNVENC := os.Getenv("FORCE_NVENC") == "true"
 
 	// Create stream manager with centralized video config
 	streamer := streaming.NewStreamManager(engine, streaming.StreamConfig{
@@ -120,6 +122,7 @@ func main() {
 		MusicVolume:  audioCfg.Volume,
 		MusicPath:    musicPath,
 		UseNVENC:     useNVENC,
+		ForceNVENC:   forceNVENC,
 	})
 
 	// Initialize avatar cache
