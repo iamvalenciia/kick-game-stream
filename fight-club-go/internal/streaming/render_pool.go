@@ -133,7 +133,8 @@ func (p *RenderWorkerPool) RenderParticlesParallel(particles []*game.Particle, b
 	p.mu.Unlock()
 
 	// For small particle counts, use sequential rendering (lower overhead)
-	if len(particles) < 50 {
+	// Lowered threshold from 50 to 30 to parallelize earlier during combat
+	if len(particles) < 30 {
 		p.renderParticlesSequential(particles, buffer, width, height)
 		return
 	}
@@ -261,7 +262,8 @@ func (p *RenderWorkerPool) RenderParticlesSnapshotParallel(particles []game.Part
 	p.mu.Unlock()
 
 	// For small particle counts, use sequential rendering (lower overhead)
-	if len(particles) < 50 {
+	// Lowered threshold from 50 to 30 to parallelize earlier during combat
+	if len(particles) < 30 {
 		p.renderParticlesSnapshotSequential(particles, buffer, width, height)
 		return
 	}

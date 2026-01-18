@@ -4,13 +4,19 @@ import (
 	"sync/atomic"
 )
 
+// BufferSize is the number of frame slots in the ring buffer.
+// Increased from 4 to 8 for better backpressure handling during combat peaks.
+// At 24fps: 8 frames = ~333ms buffer (vs ~167ms with 4 frames)
+// This gives FFmpeg more time to catch up during encoding spikes.
+const BufferSize = 8
+
 // FrameRingBuffer provides lock-free frame buffering for backpressure handling.
 // Uses a ring buffer with atomic operations to decouple frame production from FFmpeg writes.
 // If the buffer is full, new frames are dropped (better than blocking the render loop).
 type FrameRingBuffer struct {
-	frames    [4][]byte // 4-slot ring buffer (~133ms at 30fps)
-	readIdx   uint32    // atomic - consumer index
-	writeIdx  uint32    // atomic - producer index
+	frames    [BufferSize][]byte // ring buffer for backpressure handling
+	readIdx   uint32             // atomic - consumer index
+	writeIdx  uint32             // atomic - producer index
 	frameSize int
 
 	// Stats
@@ -26,7 +32,7 @@ func NewFrameRingBuffer(frameSize int) *FrameRingBuffer {
 	}
 
 	// Pre-allocate all frame buffers
-	for i := 0; i < 4; i++ {
+	for i := 0; i < BufferSize; i++ {
 		rb.frames[i] = make([]byte, frameSize)
 	}
 
@@ -42,7 +48,7 @@ func (rb *FrameRingBuffer) TryWrite(frame []byte) bool {
 	}
 
 	currentWrite := atomic.LoadUint32(&rb.writeIdx)
-	nextWrite := (currentWrite + 1) % 4
+	nextWrite := (currentWrite + 1) % BufferSize
 
 	// Check if buffer is full (would catch up to reader)
 	if nextWrite == atomic.LoadUint32(&rb.readIdx) {
@@ -76,7 +82,7 @@ func (rb *FrameRingBuffer) TryRead() []byte {
 	frame := rb.frames[readIdx]
 
 	// Advance read index
-	nextRead := (readIdx + 1) % 4
+	nextRead := (readIdx + 1) % BufferSize
 	atomic.StoreUint32(&rb.readIdx, nextRead)
 	atomic.AddUint64(&rb.framesRead, 1)
 
@@ -91,7 +97,7 @@ func (rb *FrameRingBuffer) Available() int {
 	if writeIdx >= readIdx {
 		return int(writeIdx - readIdx)
 	}
-	return int(4 - readIdx + writeIdx)
+	return int(BufferSize - readIdx + writeIdx)
 }
 
 // GetStats returns buffer statistics.
