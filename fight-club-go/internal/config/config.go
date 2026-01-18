@@ -72,16 +72,17 @@ type ResourceLimits struct {
 }
 
 // DefaultLimits returns the default resource limits.
+// Particle/effect limits reduced for better performance during intense combat (20+ players).
 func DefaultLimits() ResourceLimits {
 	return ResourceLimits{
 		MaxTotalPlayers: 1_000_000,
 		MaxPlayers:      200,
-		MaxParticles:    200,
-		MaxEffects:      20,
-		MaxTexts:        30,
-		MaxTrails:       20,
-		MaxFlashes:      10,
-		MaxProjectiles:  30,
+		MaxParticles:    150, // Reduced from 200 - less GPU/encoding overhead during combat
+		MaxEffects:      15,  // Reduced from 20 - less visual complexity
+		MaxTexts:        25,  // Reduced from 30
+		MaxTrails:       15,  // Reduced from 20 - weapon trails cost rendering time
+		MaxFlashes:      8,   // Reduced from 10
+		MaxProjectiles:  25,  // Reduced from 30
 	}
 }
 
