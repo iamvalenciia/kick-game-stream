@@ -36,6 +36,9 @@ type StreamConfig struct {
 	MusicEnabled bool
 	MusicVolume  float64 // 0.0-1.0, recommended 0.1-0.2
 	MusicPath    string
+
+	// Hardware encoding configuration
+	UseNVENC bool // Use NVIDIA NVENC hardware encoder (requires NVIDIA GPU)
 }
 
 // DoubleBuffer provides non-blocking frame buffering
@@ -246,6 +249,23 @@ func (s *StreamManager) OnStreamStart(callback func()) {
 	s.mu.Unlock()
 }
 
+// checkNVENCAvailable tests if NVIDIA NVENC hardware encoder is available
+// by running a quick FFmpeg test encode
+func checkNVENCAvailable() bool {
+	// Quick test: try to initialize NVENC encoder
+	cmd := exec.Command("ffmpeg",
+		"-f", "lavfi",
+		"-i", "nullsrc=s=64x64:d=0.1",
+		"-c:v", "h264_nvenc",
+		"-f", "null",
+		"-",
+	)
+	cmd.Stderr = nil
+	cmd.Stdout = nil
+	err := cmd.Run()
+	return err == nil
+}
+
 // Start begins streaming to RTMP
 func (s *StreamManager) Start() error {
 	s.mu.Lock()
@@ -263,7 +283,19 @@ func (s *StreamManager) Start() error {
 	log.Printf("   RTMP URL: %s", s.config.RTMPURL)
 	log.Printf("   Stream Key: %s...", s.config.StreamKey[:min(10, len(s.config.StreamKey))])
 
-	log.Println("   🎥 Using libx264 CPU encoding")
+	// Determine encoder: NVENC (GPU) vs libx264 (CPU)
+	useNVENC := false
+	if s.config.UseNVENC {
+		if checkNVENCAvailable() {
+			useNVENC = true
+			log.Println("   🎥 Using NVENC GPU hardware encoding (NVIDIA)")
+		} else {
+			log.Println("   ⚠️ NVENC requested but not available, falling back to libx264 CPU")
+		}
+	}
+	if !useNVENC {
+		log.Println("   🎥 Using libx264 CPU encoding")
+	}
 
 	// Build FFmpeg arguments - CROSS-PLATFORM
 	// Windows: Uses file-based audio (ExtraFiles not supported)
@@ -322,19 +354,42 @@ func (s *StreamManager) Start() error {
 	}
 
 	// Video encoding - optimized for speed
-	args = append(args,
-		"-c:v", "libx264",
-		"-preset", "ultrafast",
-		"-tune", "zerolatency",
-		"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
-		"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
-		"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
-		"-pix_fmt", "yuv420p",
-		"-g", fmt.Sprintf("%d", s.config.FPS*2),
-		"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
-		"-sc_threshold", "0",
-		"-profile:v", "main",
-	)
+	if useNVENC {
+		// NVIDIA NVENC hardware encoding - significantly faster than CPU
+		// Optimized for RTX 30/40 series with low-latency streaming preset
+		args = append(args,
+			"-c:v", "h264_nvenc",
+			"-preset", "p1",        // Fastest NVENC preset (p1-p7, p1=fastest)
+			"-tune", "ll",          // Low-latency tuning
+			"-rc", "cbr",           // Constant bitrate for streaming stability
+			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
+			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-pix_fmt", "yuv420p",
+			"-g", fmt.Sprintf("%d", s.config.FPS*2), // GOP size
+			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
+			"-no-scenecut", "1",    // Disable scene cut detection for consistent keyframes
+			"-profile:v", "main",
+			"-level", "4.1",        // H.264 level for compatibility
+			"-spatial-aq", "1",     // Spatial adaptive quantization for better quality
+			"-zerolatency", "1",    // Minimize encoding latency
+		)
+	} else {
+		// CPU encoding with libx264 - fallback option
+		args = append(args,
+			"-c:v", "libx264",
+			"-preset", "ultrafast",
+			"-tune", "zerolatency",
+			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
+			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-pix_fmt", "yuv420p",
+			"-g", fmt.Sprintf("%d", s.config.FPS*2),
+			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
+			"-sc_threshold", "0",
+			"-profile:v", "main",
+		)
+	}
 
 	// Audio encoding
 	if !useAudioPipe && musicFileExists {

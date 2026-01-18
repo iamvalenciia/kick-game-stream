@@ -103,6 +103,11 @@ func main() {
 	// Music configuration from centralized config
 	musicPath := getEnvWithDefault("MUSIC_PATH", "assets/music/digital_fight_arena.ogg")
 
+	// Hardware encoding configuration
+	// USE_NVENC=true enables NVIDIA GPU hardware encoding (requires NVIDIA GPU with NVENC support)
+	// This significantly reduces CPU usage and improves streaming performance
+	useNVENC := os.Getenv("USE_NVENC") == "true"
+
 	// Create stream manager with centralized video config
 	streamer := streaming.NewStreamManager(engine, streaming.StreamConfig{
 		Width:        videoCfg.Width,
@@ -114,6 +119,7 @@ func main() {
 		MusicEnabled: audioCfg.Enabled,
 		MusicVolume:  audioCfg.Volume,
 		MusicPath:    musicPath,
+		UseNVENC:     useNVENC,
 	})
 
 	// Initialize avatar cache
