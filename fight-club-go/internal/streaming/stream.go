@@ -52,8 +52,9 @@ type DoubleBuffer struct {
 
 // StreamManager handles rendering and FFmpeg streaming
 type StreamManager struct {
-	engine    *game.Engine
-	config    StreamConfig
+	engine         *game.Engine     // Legacy: direct engine reference (used if snapshotSource is nil)
+	snapshotSource SnapshotSource   // Generic snapshot source (IPC or local engine)
+	config         StreamConfig
 	ffmpeg    *exec.Cmd
 	videoPipe io.WriteCloser
 
@@ -182,9 +183,80 @@ func NewStreamManager(engine *game.Engine, config StreamConfig) *StreamManager {
 		reconnectBaseDelay: 2 * time.Second,      // Start with 2 second delay
 	}
 
+	// Initialize snapshot source from engine (local mode)
+	if engine != nil {
+		sm.snapshotSource = NewLocalEngineSource(engine)
+	}
+
 	// REAL-TIME FIX: Load fonts once at startup (not per-frame)
 	sm.loadFonts()
 
+	return sm
+}
+
+// NewStreamManagerWithSource creates a stream manager with a custom snapshot source
+// This is used for IPC mode where snapshots come from another process
+func NewStreamManagerWithSource(source SnapshotSource, config StreamConfig) *StreamManager {
+	// Fallback defaults
+	if config.Width == 0 {
+		config.Width = 1280
+	}
+	if config.Height == 0 {
+		config.Height = 720
+	}
+	if config.FPS == 0 {
+		config.FPS = 24
+	}
+	if config.Bitrate == 0 {
+		config.Bitrate = 4000
+	}
+
+	frameSize := config.Width * config.Height * 4
+
+	doubleBuffer := &DoubleBuffer{
+		buffers: [2][]byte{
+			make([]byte, frameSize),
+			make([]byte, frameSize),
+		},
+		contexts: [2]*gg.Context{
+			gg.NewContext(config.Width, config.Height),
+			gg.NewContext(config.Width, config.Height),
+		},
+		activeIndex: 0,
+	}
+
+	workerPool := NewRenderWorkerPool(0)
+	workerPool.Start()
+
+	fastRenderer := NewFastRenderer(config.Width, config.Height, doubleBuffer.buffers[0])
+	frameRingBuffer := NewFrameRingBuffer(frameSize)
+
+	audioConfig := &AudioConfig{
+		MusicEnabled: config.MusicEnabled,
+		MusicVolume:  config.MusicVolume,
+		MusicPath:    config.MusicPath,
+	}
+
+	sm := &StreamManager{
+		engine:               nil, // No local engine in IPC mode
+		snapshotSource:       source,
+		config:               config,
+		audioMixer:           NewAudioMixer(audioConfig),
+		stopChan:             make(chan struct{}),
+		doubleBuffer:         doubleBuffer,
+		workerPool:           workerPool,
+		fastRenderer:         fastRenderer,
+		frameBuffer:          make([]byte, frameSize),
+		frameRingBuffer:      frameRingBuffer,
+		avatarCache:          avatar.NewCache(200),
+		prevAttackingPlayers: make(map[string]bool),
+		prevAlivePlayers:     make(map[string]bool),
+		prevTotalKills:       0,
+		maxReconnects:        10,
+		reconnectBaseDelay:   2 * time.Second,
+	}
+
+	sm.loadFonts()
 	return sm
 }
 
@@ -876,9 +948,16 @@ func (s *StreamManager) renderAndSendFrame() {
 
 	// REAL-TIME FIX: Use lock-free GetSnapshot() instead of blocking GetState()
 	// This is the critical change - render loop NEVER blocks on game tick
-	snapshot := s.engine.GetSnapshot()
+	// Use snapshotSource which can be local engine or IPC
+	var snapshot *game.GameSnapshot
+	if s.snapshotSource != nil {
+		snapshot = s.snapshotSource.GetSnapshot()
+	} else if s.engine != nil {
+		// Fallback to direct engine access (legacy)
+		snapshot = s.engine.GetSnapshot()
+	}
 	if snapshot == nil {
-		// No snapshot available yet (engine not started)
+		// No snapshot available yet (engine/IPC not ready)
 		return
 	}
 
