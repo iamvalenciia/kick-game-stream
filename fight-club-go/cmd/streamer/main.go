@@ -159,8 +159,8 @@ func main() {
 				received, seq, reconnects, errors, connected)
 
 			stats := streamer.GetStats()
-			log.Printf("📊 Stream Stats: frames=%d, dropped=%d, uptime=%v",
-				stats.FramesSent, stats.DroppedFrames, stats.Uptime)
+			log.Printf("📊 Stream Stats: frames=%v, uptime=%v, streaming=%v",
+				stats["framesSent"], stats["uptime"], stats["streaming"])
 		}
 	}()
 
