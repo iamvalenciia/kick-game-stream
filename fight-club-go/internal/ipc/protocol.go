@@ -14,8 +14,13 @@ import (
 )
 
 const (
-	// DefaultSocketPath is the Unix socket path for IPC
+	// DefaultSocketPath is the Unix socket path for IPC (Linux/macOS)
+	// On Windows, this will be ignored and TCP localhost will be used instead
 	DefaultSocketPath = "/tmp/fight-club.sock"
+
+	// DefaultTCPPort is the TCP port for IPC on Windows
+	// Windows doesn't support Unix domain sockets reliably, so we use TCP localhost
+	DefaultTCPPort = "127.0.0.1:9876"
 
 	// Message types
 	MsgTypeSnapshot byte = 0x01

@@ -69,7 +69,8 @@ func (p *Publisher) Start() error {
 		return nil // Already running
 	}
 
-	listener, err := CreateListener(p.socketPath)
+	// Use platform-specific listener (Unix socket on Linux/macOS, TCP on Windows)
+	listener, err := CreatePlatformListener(p.socketPath)
 	if err != nil {
 		atomic.StoreInt32(&p.running, 0)
 		return err
@@ -84,7 +85,7 @@ func (p *Publisher) Start() error {
 	p.wg.Add(1)
 	go p.broadcastLoop()
 
-	log.Printf("📡 IPC Publisher started on %s", p.socketPath)
+	log.Printf("📡 IPC Publisher started on %s", GetPlatformAddress(p.socketPath))
 	return nil
 }
 

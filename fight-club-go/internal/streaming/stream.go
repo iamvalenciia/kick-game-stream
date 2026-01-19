@@ -554,6 +554,9 @@ func (s *StreamManager) Start() error {
 	// This prevents the render loop from blocking when FFmpeg's pipe is full
 	s.asyncWriter = NewAsyncFrameWriter(s.frameRingBuffer, s.videoPipe)
 
+	// Set bitrate for connection quality recommendations
+	s.asyncWriter.SetBitrate(s.config.Bitrate)
+
 	// Set up auto-reconnection callback
 	s.asyncWriter.SetOnConnectionLost(func() {
 		go s.handleConnectionLost()

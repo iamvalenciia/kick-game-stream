@@ -5,10 +5,14 @@ import (
 )
 
 // BufferSize is the number of frame slots in the ring buffer.
-// Increased from 4 to 8 for better backpressure handling during combat peaks.
-// At 24fps: 8 frames = ~333ms buffer (vs ~167ms with 4 frames)
-// This gives FFmpeg more time to catch up during encoding spikes.
-const BufferSize = 8
+// Increased from 8 to 16 for better backpressure handling during:
+// - Combat peaks with many particles/effects
+// - Network congestion or upload speed fluctuations
+// - Initial RTMPS handshake latency spikes
+// At 30fps: 16 frames = ~533ms buffer
+// At 24fps: 16 frames = ~667ms buffer
+// This gives FFmpeg more time to catch up during encoding/upload spikes.
+const BufferSize = 16
 
 // FrameRingBuffer provides lock-free frame buffering for backpressure handling.
 // Uses a ring buffer with atomic operations to decouple frame production from FFmpeg writes.
