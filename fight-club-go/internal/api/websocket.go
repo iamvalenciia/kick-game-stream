@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"fight-club/internal/game"
-	"fight-club/internal/streaming"
 
 	"github.com/gorilla/websocket"
 )
@@ -144,7 +143,7 @@ func (h *WebSocketHub) ClientCount() int {
 }
 
 // StartBroadcastLoop starts broadcasting game state periodically
-func (h *WebSocketHub) StartBroadcastLoop(engine *game.Engine, streamer *streaming.StreamManager) {
+func (h *WebSocketHub) StartBroadcastLoop(engine *game.Engine, streamer StreamerInterface) {
 	ticker := time.NewTicker(100 * time.Millisecond) // 10 updates per second
 
 	go func() {
