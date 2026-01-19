@@ -60,6 +60,9 @@ type Service struct {
 	// Event handlers
 	onChatMessage func(msg ChatMessage)
 
+	// Async processing
+	asyncHandler bool // If true, handler is called in goroutine
+
 	// Status
 	isConnected bool
 }
@@ -141,6 +144,19 @@ func (s *Service) OnChatMessage(handler func(ChatMessage)) {
 	s.mu.Lock()
 	s.onChatMessage = handler
 	s.mu.Unlock()
+}
+
+// SetAsyncHandler enables/disables async handler execution.
+// When enabled, chat message handlers are called in a separate goroutine,
+// preventing webhook response latency from affecting game performance.
+// This is RECOMMENDED for production to avoid FFmpeg backpressure.
+func (s *Service) SetAsyncHandler(async bool) {
+	s.mu.Lock()
+	s.asyncHandler = async
+	s.mu.Unlock()
+	if async {
+		log.Println("⚡ Kick webhook async mode enabled - handlers run in goroutines")
+	}
 }
 
 // generateRandomString creates a cryptographically random string
@@ -579,13 +595,20 @@ func (s *Service) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			log.Printf("💬 [%s]: %s", msg.Username, msg.Content)
 		}
 
-		// Call handler
+		// Call handler (async to prevent webhook latency affecting game)
 		s.mu.RLock()
 		handler := s.onChatMessage
+		asyncMode := s.asyncHandler
 		s.mu.RUnlock()
 
 		if handler != nil {
-			handler(msg)
+			if asyncMode {
+				// Non-blocking: handler runs in goroutine
+				go handler(msg)
+			} else {
+				// Legacy blocking mode
+				handler(msg)
+			}
 		}
 	}
 

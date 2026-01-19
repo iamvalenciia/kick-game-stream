@@ -132,11 +132,22 @@ func main() {
 	// Initialize Kick service for OAuth webhooks
 	var kickService *kick.Service
 	var kickBot *kick.Bot
+	var profileCache *kick.ProfileURLCache
 	chatHandler := chat.NewHandler(engine)
+
+	// Create command queue with worker pool for non-blocking command processing
+	// This decouples webhook handlers from game engine, eliminating latency
+	commandQueue := chat.NewCommandQueue(chatHandler, chat.DefaultQueueConfig())
+	commandQueue.Start()
 
 	if clientID != "" && clientSecret != "" {
 		kickService = kick.NewService(clientID, clientSecret)
-		// ... (rest of init)
+
+		// Create profile URL cache for lazy-loading avatars (non-blocking)
+		profileCache = kick.NewProfileURLCache(kickService, kick.DefaultProfileCacheConfig())
+
+		// Enable async webhook handling to prevent backpressure on FFmpeg
+		kickService.SetAsyncHandler(true)
 
 		// Set broadcaster ID if avail
 		if broadcasterID != "" {
@@ -148,17 +159,21 @@ func main() {
 			kickService.SetWebhookURL(publicURL + "/api/kick/webhook")
 		}
 
-		// Register chat message handler
+		// Register chat message handler - NOW NON-BLOCKING
+		// Commands are enqueued and processed by worker pool
 		kickService.OnChatMessage(func(msg kick.ChatMessage) {
 			if msg.IsCommand {
 				profilePic := msg.ProfilePic
 
-				// If profile picture is not in webhook, fetch from API
+				// If profile picture is not in webhook, use cache (non-blocking)
+				// The cache will trigger an async fetch if not found
 				if profilePic == "" && msg.UserID != 0 {
-					if pic, err := kickService.GetUserProfilePicture(msg.UserID); err == nil && pic != "" {
-						profilePic = pic
-						log.Printf("📷 Fetched profile picture for %s: %s", msg.Username, pic[:min(50, len(pic))])
+					// First, cache the URL if it came from webhook
+					if msg.ProfilePic != "" {
+						profileCache.Set(msg.UserID, msg.ProfilePic)
 					}
+					// Try to get from cache, triggers async fetch if missing
+					profilePic = profileCache.GetOrFetchAsync(msg.UserID)
 				}
 
 				cmd := chat.ChatCommand{
@@ -168,7 +183,11 @@ func main() {
 					UserID:     msg.UserID,
 					ProfilePic: profilePic,
 				}
-				chatHandler.ProcessCommand(cmd)
+
+				// Non-blocking enqueue - returns immediately
+				if !commandQueue.Enqueue(cmd) {
+					log.Printf("⚠️ Command queue full, dropped !%s from %s", cmd.Command, cmd.Username)
+				}
 			}
 		})
 
@@ -315,6 +334,10 @@ func main() {
 	<-quit
 
 	log.Println("🛑 Shutting down...")
+
+	// Stop command queue first (drain pending commands)
+	commandQueue.Stop()
+
 	if kickBot != nil {
 		kickBot.Stop()
 	}
