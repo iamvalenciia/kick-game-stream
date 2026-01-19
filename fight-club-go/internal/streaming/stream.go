@@ -367,6 +367,7 @@ func (s *StreamManager) Start() error {
 	}
 
 	log.Println("🎬 Starting stream to Kick...")
+	log.Println("   Mode: DIRECT RTMP (no proxy/tunnel - minimal latency)")
 	log.Printf("   Resolution: %dx%d @ %d fps", s.config.Width, s.config.Height, s.config.FPS)
 	log.Printf("   Bitrate: %dk", s.config.Bitrate)
 	log.Printf("   RTMP URL: %s", s.config.RTMPURL)
@@ -568,7 +569,7 @@ func (s *StreamManager) Start() error {
 		go s.audioLoop()
 	}
 
-	log.Println("✅ Stream started!")
+	log.Println("✅ Stream started! (Direct RTMP to Kick - no proxy overhead)")
 
 	// Trigger onStreamStart callback if set
 	if s.onStreamStart != nil {

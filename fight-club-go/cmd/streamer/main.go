@@ -40,6 +40,7 @@ func main() {
 	log.Println("================================")
 	log.Println("  FIGHT CLUB - STREAMER")
 	log.Println("  GPU Encoding (NVENC)")
+	log.Println("  Direct RTMP to Kick (no proxy)")
 	log.Println("================================")
 
 	// IPC configuration
@@ -68,8 +69,12 @@ func main() {
 
 	log.Printf("IPC Socket: %s", socketPath)
 	log.Printf("Video: %dx%d @ %d FPS, %dk bitrate", width, height, fps, bitrate)
-	log.Printf("RTMP: %s", rtmpURL)
-	log.Printf("Stream Key: %s...", streamKey[:min(15, len(streamKey))])
+	log.Println("")
+	log.Println("DIRECT STREAMING (no ngrok/tunnel):")
+	log.Printf("  RTMP Endpoint: %s", rtmpURL)
+	log.Printf("  Stream Key: %s...", streamKey[:min(15, len(streamKey))])
+	log.Println("  -> Video data goes directly to Kick's ingest servers")
+	log.Println("  -> No proxy or tunnel overhead = minimal latency")
 
 	// =========================================================================
 	// HARDWARE ENCODING - NVENC by default
