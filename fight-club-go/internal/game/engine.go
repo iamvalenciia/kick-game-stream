@@ -245,7 +245,8 @@ func (e *Engine) tick() {
 		}
 
 		// AI movement and combat with spatial index
-		player.Update(playerList, uint32(i), e.spatialGrid, deltaTime, e)
+		// Pass e.players map for O(1) focus target lookup
+		player.Update(playerList, uint32(i), e.spatialGrid, deltaTime, e, e.players)
 	}
 
 	// Resolve collisions using spatial grid
@@ -594,6 +595,7 @@ func (e *Engine) updateShake() {
 }
 
 // updateProjectiles moves projectiles and checks for collisions
+// Uses spatial grid for O(P×log K) collision detection instead of O(P×K)
 // Projectiles that hit a target or expire are removed
 func (e *Engine) updateProjectiles() {
 	deltaTime := 1.0 / float64(e.tickRate)
@@ -601,9 +603,14 @@ func (e *Engine) updateProjectiles() {
 
 	n := 0
 	for _, proj := range e.projectiles {
-		// Check for collision with any player
+		// Check for collision using spatial grid for nearby players only
 		hit := false
-		for _, target := range playerList {
+		// Query nearby players within collision range (projectile radius + player radius + buffer)
+		collisionRange := ProjectileRadius + PlayerRadius + 10.0
+		candidates := e.spatialGrid.QueryRadius(proj.X, proj.Y, collisionRange)
+
+		for _, idx := range candidates {
+			target := playerList[idx]
 			if proj.CheckHit(target) {
 				// Apply damage and effects
 				e.processProjectileHit(proj, target)
@@ -625,15 +632,8 @@ func (e *Engine) updateProjectiles() {
 
 // processProjectileHit handles when a projectile hits a player
 func (e *Engine) processProjectileHit(proj *Projectile, victim *Player) {
-	// Find the attacker for kill credit
-	var attacker *Player
-	for _, p := range e.players {
-		if p.ID == proj.OwnerID {
-			attacker = p
-			break
-		}
-	}
-
+	// Use direct owner reference instead of O(n) linear search
+	attacker := proj.Owner
 	if attacker == nil {
 		return // Attacker disconnected, no damage
 	}

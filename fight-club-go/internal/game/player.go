@@ -151,7 +151,8 @@ func NewPlayer(name string, opts PlayerOptions) *Player {
 // Update updates the player state each tick
 // selfIdx: index of this player in the players slice
 // grid: spatial grid for O(1) neighbor queries
-func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.SpatialGrid, deltaTime float64, engine *Engine) {
+// playerMap: optional map[string]*Player for O(1) focus target lookup
+func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.SpatialGrid, deltaTime float64, engine *Engine, playerMap ...map[string]*Player) {
 	if p.IsDead || p.IsRagdoll {
 		return
 	}
@@ -196,7 +197,8 @@ func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.Spatial
 	}
 
 	// Find target using spatial grid (O(k) instead of O(n))
-	p.findTarget(players, selfIdx, grid)
+	// Pass playerMap for O(1) focus target lookup if available
+	p.findTarget(players, selfIdx, grid, playerMap...)
 
 	// AI behavior
 	if p.Target != nil {
@@ -228,22 +230,31 @@ func (p *Player) Update(players []*Player, selfIdx uint32, grid *spatial.Spatial
 
 // findTarget uses spatial grid for O(k) neighbor lookup instead of O(n) scan
 // When no nearby target is found, falls back to global search for exploration
-func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.SpatialGrid) {
+// playerMap is optional - if provided, enables O(1) focus target lookup
+func (p *Player) findTarget(players []*Player, selfIdx uint32, grid *spatial.SpatialGrid, playerMap ...map[string]*Player) {
 	// Priority 1: Focus target (if valid and alive)
-	// This still needs full scan since focus target can be anywhere
 	if p.FocusTarget != "" {
-		for _, other := range players {
-			if other.Name == p.FocusTarget {
-				if !other.IsDead && !other.IsRagdoll {
-					// NOTE: Allows targeting spawn-protected - approach immediately
-					// Also check team - can't focus teammates
-					if p.TeamID == "" || p.TeamID != other.TeamID {
-						p.Target = other
-						return
-					}
+		var focusedPlayer *Player
+
+		// Use O(1) map lookup if playerMap is provided, otherwise O(n) linear search
+		if len(playerMap) > 0 && playerMap[0] != nil {
+			focusedPlayer = playerMap[0][p.FocusTarget]
+		} else {
+			// Fallback to linear search if map not provided
+			for _, other := range players {
+				if other.Name == p.FocusTarget {
+					focusedPlayer = other
+					break
 				}
-				// Focus target died or became invalid - will be cleared in Update
-				break
+			}
+		}
+
+		if focusedPlayer != nil && !focusedPlayer.IsDead && !focusedPlayer.IsRagdoll {
+			// NOTE: Allows targeting spawn-protected - approach immediately
+			// Also check team - can't focus teammates
+			if p.TeamID == "" || p.TeamID != focusedPlayer.TeamID {
+				p.Target = focusedPlayer
+				return
 			}
 		}
 		// Focus target not found or invalid, clear it

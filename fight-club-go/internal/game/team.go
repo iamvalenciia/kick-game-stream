@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -273,14 +274,10 @@ func (tm *TeamManager) GetTopTeams(limit int) []*Team {
 		teams = append(teams, team)
 	}
 
-	// Sort by kills descending
-	for i := 0; i < len(teams)-1; i++ {
-		for j := i + 1; j < len(teams); j++ {
-			if teams[j].Kills > teams[i].Kills {
-				teams[i], teams[j] = teams[j], teams[i]
-			}
-		}
-	}
+	// Sort by kills descending using O(n log n) sort instead of O(n²) bubble sort
+	sort.Slice(teams, func(i, j int) bool {
+		return teams[i].Kills > teams[j].Kills
+	})
 
 	if len(teams) > limit {
 		teams = teams[:limit]

@@ -63,9 +63,20 @@ type WeaponAnimationConfig struct {
 	ProjectileSpeed float64 // Pixels per second
 }
 
-// DefaultWeaponAnimations returns animation configurations for all weapons
-// These are tuned for streaming readability at 720p/30 FPS
-func DefaultWeaponAnimations() map[string]WeaponAnimationConfig {
+// cachedWeaponAnimations stores animation configurations to avoid map allocation on every call.
+// Initialized once at package load time.
+var cachedWeaponAnimations map[string]WeaponAnimationConfig
+
+// defaultFistsAnimation is cached for fallback to avoid map lookup.
+var defaultFistsAnimation WeaponAnimationConfig
+
+func init() {
+	cachedWeaponAnimations = initWeaponAnimations()
+	defaultFistsAnimation = cachedWeaponAnimations["fists"]
+}
+
+// initWeaponAnimations creates the animation config map (called once at init).
+func initWeaponAnimations() map[string]WeaponAnimationConfig {
 	return map[string]WeaponAnimationConfig{
 		// ==========================================================================
 		// 👊 FISTS - Fast, close-range punches with minimal knockback
@@ -277,14 +288,20 @@ func DefaultWeaponAnimations() map[string]WeaponAnimationConfig {
 	}
 }
 
-// GetWeaponAnimation returns the animation config for a weapon ID
-// Defaults to fists if weapon not found
+// DefaultWeaponAnimations returns animation configurations for all weapons.
+// Returns the cached map - callers should NOT modify the returned map.
+func DefaultWeaponAnimations() map[string]WeaponAnimationConfig {
+	return cachedWeaponAnimations
+}
+
+// GetWeaponAnimation returns the animation config for a weapon ID.
+// Uses cached map lookup - O(1) with no allocation.
+// Defaults to fists if weapon not found.
 func GetWeaponAnimation(weaponID string) WeaponAnimationConfig {
-	anims := DefaultWeaponAnimations()
-	if anim, ok := anims[weaponID]; ok {
+	if anim, ok := cachedWeaponAnimations[weaponID]; ok {
 		return anim
 	}
-	return anims["fists"]
+	return defaultFistsAnimation
 }
 
 // TotalAttackTicks returns the full animation duration in ticks

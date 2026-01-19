@@ -117,12 +117,16 @@ var Weapons = map[string]Weapon{
 	},
 }
 
-// GetWeapon returns a weapon by ID, defaults to fists
+// defaultFistsWeapon is cached to avoid map lookup on fallback.
+var defaultFistsWeapon = Weapons["fists"]
+
+// GetWeapon returns a weapon by ID, defaults to fists.
+// Uses cached map lookup - O(1) with no allocation.
 func GetWeapon(id string) Weapon {
 	if w, ok := Weapons[id]; ok {
 		return w
 	}
-	return Weapons["fists"]
+	return defaultFistsWeapon
 }
 
 // GetAllWeapons returns all weapons as a slice

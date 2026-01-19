@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 
 	"fight-club/internal/game"
 )
@@ -44,15 +45,11 @@ func (h *routerHandlers) handleGetStats(w http.ResponseWriter, r *http.Request) 
 func (h *routerHandlers) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	state := h.engine.GetState()
 
-	// Sort by kills (simple bubble sort for now)
+	// Sort by kills using O(n log n) sort instead of O(n²) bubble sort
 	players := state.Players
-	for i := 0; i < len(players); i++ {
-		for j := i + 1; j < len(players); j++ {
-			if players[j].Kills > players[i].Kills {
-				players[i], players[j] = players[j], players[i]
-			}
-		}
-	}
+	sort.Slice(players, func(i, j int) bool {
+		return players[i].Kills > players[j].Kills
+	})
 
 	// Top 10
 	limit := 10

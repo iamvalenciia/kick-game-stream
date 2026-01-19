@@ -8,9 +8,10 @@ import (
 // Projectile represents a moving attack entity (arrows, thrown weapons)
 // Projectiles travel through space over multiple frames and check collision each tick
 type Projectile struct {
-	ID        string // Unique identifier
-	OwnerID   string // Player who fired this projectile
-	OwnerName string // For kill credit
+	ID        string  // Unique identifier
+	OwnerID   string  // Player who fired this projectile
+	OwnerName string  // For kill credit
+	Owner     *Player // Direct reference to owner - avoids O(n) lookup
 
 	// Position and motion
 	X, Y   float64 // Current position
@@ -70,6 +71,7 @@ func NewProjectile(owner *Player, targetX, targetY float64, damage int, tickCoun
 		ID:        fmt.Sprintf("proj_%d_%s", tickCount, owner.ID),
 		OwnerID:   owner.ID,
 		OwnerName: owner.Name,
+		Owner:     owner, // Store direct reference - avoids O(n) lookup
 		X:         startX,
 		Y:         startY,
 		VX:        dirX * speedPerTick,
