@@ -33,6 +33,11 @@ type AudioMixer struct {
 
 	// Background music player (OGG Vorbis streaming)
 	musicPlayer *MusicPlayer
+
+	// Pre-allocated buffers to avoid GC pressure in hot path
+	mixBuffer    []int32 // Mixing buffer for combining audio sources
+	musicSamples []int16 // Buffer for music samples
+	outputBuffer []byte  // Final output buffer
 }
 
 type activeSound struct {
@@ -45,16 +50,24 @@ type activeSound struct {
 // NewAudioMixer creates a new audio mixer
 // Pass nil config for defaults (no music)
 func NewAudioMixer(config *AudioConfig) *AudioMixer {
-	m := &AudioMixer{
-		sampleRate:   44100,
-		channels:     2,
-		sounds:       make(map[string][]int16),
-		activeSounds: make([]*activeSound, 0),
-	}
+	sampleRate := 44100
+	channels := 2
+	samplesPerFrame := sampleRate / 30
+	bytesPerFrame := samplesPerFrame * channels * 2
 
-	// 44100 / 30 fps = 1470 samples per frame
-	// 1470 * 2 channels * 2 bytes = 5880 bytes per frame
-	m.bytesPerFrame = (m.sampleRate / 30) * m.channels * 2
+	m := &AudioMixer{
+		sampleRate:    sampleRate,
+		channels:      channels,
+		bytesPerFrame: bytesPerFrame,
+		sounds:        make(map[string][]int16),
+		activeSounds:  make([]*activeSound, 0, 8), // Pre-allocate capacity
+
+		// Pre-allocate buffers once to avoid per-frame allocations
+		// This eliminates ~18KB of garbage per frame (432KB/sec at 24fps)
+		mixBuffer:    make([]int32, samplesPerFrame*channels),
+		musicSamples: make([]int16, samplesPerFrame*channels),
+		outputBuffer: make([]byte, bytesPerFrame),
+	}
 
 	m.loadSounds()
 
@@ -115,46 +128,49 @@ func (m *AudioMixer) QueueSound(name string) {
 // GenerateFrame generates one frame of audio (5880 bytes)
 // Mixes: background music + ambient + sound effects
 // Applies soft limiting at ±30000 to prevent clipping when mixed
+// Uses pre-allocated buffers to avoid GC pressure
 func (m *AudioMixer) GenerateFrame() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	samplesPerFrame := m.sampleRate / 30
-	mixBuffer := make([]int32, samplesPerFrame*m.channels)
+	// Clear the pre-allocated mix buffer (faster than allocating new)
+	for i := range m.mixBuffer {
+		m.mixBuffer[i] = 0
+	}
 
 	// Mix background music first (lowest priority, continuous)
 	if m.musicPlayer != nil && m.musicPlayer.IsLoaded() {
-		musicSamples := make([]int16, len(mixBuffer))
-		m.musicPlayer.ReadSamples(musicSamples)
-		for i := 0; i < len(mixBuffer); i++ {
-			mixBuffer[i] += int32(musicSamples[i])
+		m.musicPlayer.ReadSamples(m.musicSamples)
+		for i := 0; i < len(m.mixBuffer); i++ {
+			m.mixBuffer[i] += int32(m.musicSamples[i])
 		}
 	}
 
 	// Mix ambient (slightly above music)
 	if ambient, ok := m.sounds["ambient"]; ok && len(ambient) > 0 {
-		for i := 0; i < len(mixBuffer); i++ {
+		for i := 0; i < len(m.mixBuffer); i++ {
 			idx := (m.ambientPos + i) % len(ambient)
-			mixBuffer[i] += int32(float64(ambient[idx]) * 0.20) // Reduced from 0.25
+			m.mixBuffer[i] += int32(float64(ambient[idx]) * 0.20) // Reduced from 0.25
 		}
-		m.ambientPos = (m.ambientPos + len(mixBuffer)) % len(ambient)
+		m.ambientPos = (m.ambientPos + len(m.mixBuffer)) % len(ambient)
 	}
 
 	// Mix active sounds (highest priority - SFX)
-	alive := make([]*activeSound, 0)
+	// Reuse activeSounds slice by filtering in place
+	alive := m.activeSounds[:0] // Reuse underlying array
 	for _, s := range m.activeSounds {
 		remaining := len(s.data) - s.position
 		if remaining <= 0 {
 			continue
 		}
 
-		toRead := len(mixBuffer)
+		toRead := len(m.mixBuffer)
 		if toRead > remaining {
 			toRead = remaining
 		}
 
 		for i := 0; i < toRead; i++ {
-			mixBuffer[i] += int32(float64(s.data[s.position+i]) * s.volume)
+			m.mixBuffer[i] += int32(float64(s.data[s.position+i]) * s.volume)
 		}
 
 		s.position += toRead
@@ -166,9 +182,9 @@ func (m *AudioMixer) GenerateFrame() []byte {
 
 	// Convert to bytes with SOFT LIMITING (prevents harsh clipping)
 	// Soft limit at ±30000 leaves headroom, gradual curve for less distortion
-	output := make([]byte, m.bytesPerFrame)
-	for i := 0; i < len(mixBuffer) && i*2+1 < len(output); i++ {
-		sample := mixBuffer[i]
+	// Uses pre-allocated output buffer
+	for i := 0; i < len(m.mixBuffer) && i*2+1 < len(m.outputBuffer); i++ {
+		sample := m.mixBuffer[i]
 
 		// Soft limiting: gradual compression above ±30000
 		if sample > 30000 {
@@ -184,10 +200,10 @@ func (m *AudioMixer) GenerateFrame() []byte {
 			sample = -32768
 		}
 
-		binary.LittleEndian.PutUint16(output[i*2:], uint16(int16(sample)))
+		binary.LittleEndian.PutUint16(m.outputBuffer[i*2:], uint16(int16(sample)))
 	}
 
-	return output
+	return m.outputBuffer
 }
 
 // loadWAV loads a WAV file and returns the raw PCM samples

@@ -41,17 +41,26 @@ type MusicPlayer struct {
 
 	// Target sample rate (must match AudioMixer)
 	targetSampleRate int
+
+	// Pre-allocated buffer for beep samples to avoid per-frame allocations
+	// Size: samplesPerFrame = 44100/30 = 1470 stereo samples
+	beepBuffer [][2]float64
 }
 
 // NewMusicPlayer creates a music player for streaming OGG Vorbis.
 // Implements graceful fallback: if file fails to load, returns a player
 // that outputs silence (safe for production - stream continues without music).
 func NewMusicPlayer(filePath string, volume float64) *MusicPlayer {
+	// Pre-allocate beep buffer for samplesPerFrame stereo samples
+	// 44100 Hz / 30 fps = 1470 samples per frame
+	samplesPerFrame := 44100 / 30
+
 	mp := &MusicPlayer{
 		filePath:         filePath,
 		volume:           volume,
 		enabled:          true,
-		targetSampleRate: 44100, // Must match AudioMixer and FFmpeg
+		targetSampleRate: 44100,                                // Must match AudioMixer and FFmpeg
+		beepBuffer:       make([][2]float64, samplesPerFrame),  // Pre-allocated to avoid per-frame allocs
 	}
 
 	if err := mp.load(); err != nil {
@@ -108,6 +117,7 @@ func (mp *MusicPlayer) load() error {
 // for use in the audio generation loop.
 //
 // Seamless looping: When reaching end of file, applies crossfade to avoid clicks.
+// Uses pre-allocated buffer to avoid GC pressure in hot path.
 func (mp *MusicPlayer) ReadSamples(buffer []int16) int {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
@@ -120,12 +130,18 @@ func (mp *MusicPlayer) ReadSamples(buffer []int16) int {
 		return len(buffer)
 	}
 
-	// Read samples from resampled stream
+	// Read samples from resampled stream using pre-allocated buffer
 	// beep uses [][2]float64 format, we need to convert to []int16 interleaved
 	numStereoSamples := len(buffer) / 2
-	beepBuffer := make([][2]float64, numStereoSamples)
 
-	n, ok := mp.resampled.Stream(beepBuffer)
+	// Ensure we don't exceed pre-allocated buffer size
+	if numStereoSamples > len(mp.beepBuffer) {
+		numStereoSamples = len(mp.beepBuffer)
+	}
+
+	// Use slice of pre-allocated buffer
+	workBuffer := mp.beepBuffer[:numStereoSamples]
+	n, ok := mp.resampled.Stream(workBuffer)
 
 	// Handle end of stream - loop seamlessly
 	if !ok || n < numStereoSamples {
@@ -136,20 +152,20 @@ func (mp *MusicPlayer) ReadSamples(buffer []int16) int {
 			}
 		}
 
-		// Fill remaining with beginning of track (simple loop, crossfade optional)
+		// Fill remaining with beginning of track using the same buffer slice
 		if n < numStereoSamples {
-			remaining := make([][2]float64, numStereoSamples-n)
-			mp.resampled.Stream(remaining)
-			copy(beepBuffer[n:], remaining)
+			remainingSlice := workBuffer[n:numStereoSamples]
+			mp.resampled.Stream(remainingSlice)
 		}
 	}
 
 	// Convert from [][2]float64 to []int16 with volume scaling
 	// Also apply soft limiting to prevent clipping when mixed with SFX
-	for i := 0; i < numStereoSamples && i < len(beepBuffer); i++ {
+	vol := mp.volume
+	for i := 0; i < numStereoSamples; i++ {
 		// Apply volume
-		left := beepBuffer[i][0] * mp.volume
-		right := beepBuffer[i][1] * mp.volume
+		left := workBuffer[i][0] * vol
+		right := workBuffer[i][1] * vol
 
 		// Convert to int16 range (-32768 to 32767)
 		// Samples from beep are in -1.0 to 1.0 range

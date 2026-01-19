@@ -381,7 +381,7 @@ func (s *StreamManager) Start() error {
 			"-rc", "cbr",           // Constant bitrate for streaming stability
 			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
 			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
-			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate/2), // Reduced from 2x to 0.5x for lower latency
 			"-pix_fmt", "yuv420p",
 			"-g", fmt.Sprintf("%d", s.config.FPS*2), // GOP size
 			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
@@ -392,19 +392,21 @@ func (s *StreamManager) Start() error {
 			"-zerolatency", "1",    // Minimize encoding latency
 		)
 	} else {
-		// CPU encoding with libx264 - fallback option
+		// CPU encoding with libx264 - optimized for low latency
 		args = append(args,
 			"-c:v", "libx264",
 			"-preset", "ultrafast",
 			"-tune", "zerolatency",
+			"-threads", "4",        // Explicit thread count for consistent performance
 			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
 			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
-			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate/2), // Reduced from 2x to 0.5x for lower latency
 			"-pix_fmt", "yuv420p",
 			"-g", fmt.Sprintf("%d", s.config.FPS*2),
 			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
 			"-sc_threshold", "0",
 			"-profile:v", "main",
+			"-x264-params", "rc-lookahead=0:sync-lookahead=0", // Disable lookahead for minimum latency
 		)
 	}
 
