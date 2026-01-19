@@ -1,6 +1,18 @@
-// Standalone streamer process for fight-club
-// This binary connects to the server via IPC and handles ONLY rendering + FFmpeg streaming
-// This isolates the streaming from server load, ensuring smooth frames even under heavy webhook traffic
+// =============================================================================
+// FIGHT CLUB - STREAMER
+// =============================================================================
+// This standalone process handles ONLY streaming:
+// - Receives game snapshots via IPC from the game server
+// - Renders frames and encodes with FFmpeg (NVENC GPU by default)
+// - Streams to Kick via RTMP
+//
+// This separation ensures smooth streaming without interference from game logic,
+// webhooks, or API requests.
+//
+// USAGE:
+//   1. Start the game server first: go run ./cmd/server
+//   2. Then start this streamer: go run ./cmd/streamer
+// =============================================================================
 package main
 
 import (
@@ -25,45 +37,58 @@ func main() {
 		}
 	}
 
-	log.Println("🎬 ================================")
-	log.Println("🎬  FIGHT CLUB - STREAMER")
-	log.Println("🎬  Isolated Render Process")
-	log.Println("🎬 ================================")
+	log.Println("================================")
+	log.Println("  FIGHT CLUB - STREAMER")
+	log.Println("  GPU Encoding (NVENC)")
+	log.Println("================================")
 
-	// Configuration from environment
+	// IPC configuration
 	socketPath := getEnvWithDefault("IPC_SOCKET", ipc.DefaultSocketPath)
+
+	// Stream configuration - from environment
 	streamKey := os.Getenv("STREAM_KEY_KICK")
 	rtmpURL := getEnvWithDefault("RTMP_URL", "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app")
 
-	// Video config (will be overridden by server config if received)
-	width := getEnvInt("VIDEO_WIDTH", 1280)
-	height := getEnvInt("VIDEO_HEIGHT", 720)
-	fps := getEnvInt("VIDEO_FPS", 24)
-	bitrate := getEnvInt("VIDEO_BITRATE", 4000)
+	// Video config - will be overridden by server config when received
+	width := getEnvInt("STREAM_WIDTH", 1280)
+	height := getEnvInt("STREAM_HEIGHT", 720)
+	fps := getEnvInt("STREAM_FPS", 24)
+	bitrate := getEnvInt("STREAM_BITRATE", 4000)
 
 	// Audio config
 	musicEnabled := os.Getenv("MUSIC_ENABLED") != "false"
 	musicVolume := getEnvFloat("MUSIC_VOLUME", 0.15)
 	musicPath := getEnvWithDefault("MUSIC_PATH", "assets/music/digital_fight_arena.ogg")
 
-	// Hardware encoding
-	useNVENC := os.Getenv("USE_NVENC") == "true"
-	forceNVENC := os.Getenv("FORCE_NVENC") == "true"
-
 	if streamKey == "" {
-		log.Println("WARNING: STREAM_KEY_KICK not set!")
+		log.Println("ERROR: STREAM_KEY_KICK not set!")
+		log.Println("Set STREAM_KEY_KICK in your .env file")
+		os.Exit(1)
 	}
 
-	log.Printf("📡 IPC Socket: %s", socketPath)
-	log.Printf("🎮 Initial config: %dx%d @ %d FPS, %dk bitrate", width, height, fps, bitrate)
+	log.Printf("IPC Socket: %s", socketPath)
+	log.Printf("Video: %dx%d @ %d FPS, %dk bitrate", width, height, fps, bitrate)
+	log.Printf("RTMP: %s", rtmpURL)
+	log.Printf("Stream Key: %s...", streamKey[:min(15, len(streamKey))])
 
-	// Create IPC subscriber
+	// =========================================================================
+	// HARDWARE ENCODING - NVENC by default
+	// =========================================================================
+	// We use NVIDIA NVENC GPU encoding by default for best performance.
+	// This requires an NVIDIA GPU with NVENC support (GTX 600+ / RTX series).
+	// The ForceNVENC flag skips the availability check - if you're sure you
+	// have NVENC, this avoids a test encode on startup.
+	useNVENC := true
+	forceNVENC := true // Skip test, just use it
+	log.Println("Hardware encoding: NVENC (NVIDIA GPU)")
+
+	// Create IPC subscriber to receive game snapshots
 	subscriber := ipc.NewSubscriber(socketPath)
 
 	// Create snapshot source from IPC
 	snapshotSource := streaming.NewIPCSnapshotSource(subscriber)
 
-	// Initial stream config (may be updated by server)
+	// Stream configuration
 	streamConfig := streaming.StreamConfig{
 		Width:        width,
 		Height:       height,
@@ -87,29 +112,30 @@ func main() {
 
 	// Set up connection callbacks
 	subscriber.OnConnect(func() {
-		log.Println("✅ Connected to game server")
+		log.Println("Connected to game server")
 		connected = true
 	})
 
 	subscriber.OnDisconnect(func() {
-		log.Println("🔌 Disconnected from game server")
+		log.Println("Disconnected from game server")
 		connected = false
 		// Don't stop streaming immediately - IPC will reconnect
 	})
 
 	subscriber.OnConfig(func(cfg *ipc.ConfigMessage) {
-		log.Printf("📺 Received config from server: %dx%d @ %d FPS", cfg.Width, cfg.Height, cfg.FPS)
-		// Note: In a production system, you might want to restart the stream
-		// with the new config if it differs significantly
+		log.Printf("Received config from server: %dx%d @ %d FPS, %dk bitrate",
+			cfg.Width, cfg.Height, cfg.FPS, cfg.Bitrate)
+		// Note: To apply new config, would need to restart stream
 	})
 
 	// Start IPC subscriber
+	log.Println("Connecting to game server...")
 	if err := subscriber.Start(); err != nil {
 		log.Fatalf("Failed to start IPC subscriber: %v", err)
 	}
 
-	// Wait for connection and first config
-	log.Println("⏳ Waiting for connection to game server...")
+	// Wait for connection to game server
+	log.Println("Waiting for game server connection...")
 	for i := 0; i < 30; i++ { // Wait up to 30 seconds
 		if subscriber.IsConnected() {
 			break
@@ -118,33 +144,33 @@ func main() {
 	}
 
 	if !subscriber.IsConnected() {
-		log.Println("⚠️ Could not connect to server, starting anyway (will retry)")
+		log.Println("WARNING: Could not connect to game server")
+		log.Println("Make sure the game server is running: go run ./cmd/server")
+		log.Println("Continuing anyway (will retry connection)...")
 	}
 
 	// Wait for first snapshot before starting stream
-	log.Println("⏳ Waiting for first game snapshot...")
+	log.Println("Waiting for first game snapshot...")
 	for i := 0; i < 30; i++ {
 		if snapshotSource.GetSnapshot() != nil {
+			log.Println("Received first snapshot!")
 			break
 		}
 		time.Sleep(time.Second)
 	}
 
 	if snapshotSource.GetSnapshot() == nil {
-		log.Println("⚠️ No snapshot received yet, starting stream anyway")
+		log.Println("WARNING: No snapshot received yet, starting stream anyway")
 	}
 
 	// Start streaming
-	if streamKey != "" {
-		log.Println("🎬 Starting stream...")
-		if err := streamer.Start(); err != nil {
-			log.Printf("Failed to start stream: %v", err)
-		} else {
-			startedStream = true
-			log.Println("✅ Stream started!")
-		}
+	log.Println("Starting stream to Kick...")
+	if err := streamer.Start(); err != nil {
+		log.Printf("ERROR: Failed to start stream: %v", err)
+		log.Println("Check that your STREAM_KEY_KICK is valid")
 	} else {
-		log.Println("⚠️ No stream key provided, running in preview mode")
+		startedStream = true
+		log.Println("Stream started successfully!")
 	}
 
 	// Stats logging goroutine
@@ -155,11 +181,11 @@ func main() {
 		for range ticker.C {
 			received, reconnects, errors := subscriber.GetStats()
 			seq := snapshotSource.GetSequence()
-			log.Printf("📊 IPC Stats: snapshots=%d, seq=%d, reconnects=%d, errors=%d, connected=%v",
+			log.Printf("IPC: snapshots=%d, seq=%d, reconnects=%d, errors=%d, connected=%v",
 				received, seq, reconnects, errors, connected)
 
 			stats := streamer.GetStats()
-			log.Printf("📊 Stream Stats: frames=%v, uptime=%v, streaming=%v",
+			log.Printf("Stream: frames=%v, uptime=%v, streaming=%v",
 				stats["framesSent"], stats["uptime"], stats["streaming"])
 		}
 	}()
@@ -168,17 +194,19 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Println("✅ Streamer ready! Press Ctrl+C to stop.")
+	log.Println("")
+	log.Println("Streamer ready! Press Ctrl+C to stop.")
+	log.Println("")
 	<-quit
 
-	log.Println("🛑 Shutting down streamer...")
+	log.Println("Shutting down streamer...")
 
 	if startedStream {
 		streamer.Stop()
 	}
 	subscriber.Stop()
 
-	log.Println("👋 Streamer stopped!")
+	log.Println("Streamer stopped!")
 }
 
 func getEnvWithDefault(key, defaultVal string) string {
@@ -204,4 +232,11 @@ func getEnvFloat(key string, defaultVal float64) float64 {
 		}
 	}
 	return defaultVal
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

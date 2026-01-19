@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"fight-club/internal/api"
-	"fight-club/internal/avatar"
 	"fight-club/internal/chat"
 	"fight-club/internal/config"
 	"fight-club/internal/game"
@@ -20,30 +19,41 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// =============================================================================
+// FIGHT CLUB - GAME SERVER
+// =============================================================================
+// This server handles ONLY the game logic:
+// - Game engine (physics, combat, players)
+// - Kick OAuth & webhooks
+// - API endpoints
+// - IPC publishing for external streamer
+//
+// STREAMING IS HANDLED BY A SEPARATE PROCESS: go run ./cmd/streamer
+// This separation ensures smooth streaming without interference from game logic.
+// =============================================================================
+
 func main() {
 	// Load .env file from parent directory
 	if err := godotenv.Load("../.env"); err != nil {
 		// Try current directory as fallback
 		if err := godotenv.Load(".env"); err != nil {
-			log.Println("💡 No .env file found, using environment variables only")
+			log.Println("No .env file found, using environment variables only")
 		}
 	} else {
-		log.Println("✅ Loaded environment from ../.env")
+		log.Println("Loaded environment from ../.env")
 	}
 
-	log.Println("🎮 ================================")
-	log.Println("🎮  FIGHT CLUB - GO ENGINE")
-	log.Println("🎮  Kick OAuth + Webhooks")
-	log.Println("🎮 ================================")
+	log.Println("================================")
+	log.Println("  FIGHT CLUB - GAME SERVER")
+	log.Println("  (Streaming handled separately)")
+	log.Println("================================")
 
 	// Load centralized configuration (SSOT - Single Source of Truth)
 	appConfig := config.Load()
 	videoCfg := appConfig.Video
-	audioCfg := appConfig.Audio
 	serverCfg := appConfig.Server
 
 	// Load environment variables for external services
-	streamKey := os.Getenv("STREAM_KEY_KICK")
 	clientID := os.Getenv("CLIENT_ID_KICK")
 	clientSecret := os.Getenv("CLIENT_SECRET_KICK")
 	broadcasterID := os.Getenv("KICK_BROADCASTER_USER_ID")
@@ -52,27 +62,17 @@ func main() {
 	// Port from config (allows env override via serverCfg)
 	port := strconv.Itoa(serverCfg.Port)
 
-	// Kick RTMP URL
-	rtmpURL := "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app"
-
 	// Log configuration
-	log.Printf("📡 RTMP URL: %s", rtmpURL)
-	if streamKey != "" {
-		keyPreview := streamKey[:min(15, len(streamKey))] + "..."
-		log.Printf("🔑 Stream Key: %s", keyPreview)
-	} else {
-		log.Println("⚠️ WARNING: STREAM_KEY_KICK not set!")
-	}
+	log.Printf("Config: %d TPS, %dx%d world", videoCfg.FPS, videoCfg.Width, videoCfg.Height)
 	if clientID != "" {
-		log.Printf("📺 Client ID: %s...", clientID[:min(10, len(clientID))])
+		log.Printf("Client ID: %s...", clientID[:min(10, len(clientID))])
 	}
 	if broadcasterID != "" {
-		log.Printf("👤 Broadcaster ID: %s", broadcasterID)
+		log.Printf("Broadcaster ID: %s", broadcasterID)
 	}
 	if publicURL != "" {
-		log.Printf("🌐 Public URL: %s", publicURL)
+		log.Printf("Public URL: %s", publicURL)
 	}
-	log.Printf("🎮 Config: %d TPS, %d FPS, %dk bitrate, %dx%d", videoCfg.FPS, videoCfg.FPS, videoCfg.Bitrate, videoCfg.Width, videoCfg.Height)
 
 	// Create game engine with centralized config
 	engine := game.NewEngine(game.EngineConfig{
@@ -82,77 +82,55 @@ func main() {
 		Limits:      appConfig.Limits,
 	})
 	limits := engine.GetLimits()
-	log.Printf("🛡️ Resource limits: %d players, %d particles, %d effects, %d texts",
+	log.Printf("Resource limits: %d players, %d particles, %d effects, %d texts",
 		limits.MaxPlayers, limits.MaxParticles, limits.MaxEffects, limits.MaxTexts)
 
-	// IPC Publisher for external streamer process
-	// Enable with IPC_ENABLED=true to run streamer as separate process
-	var ipcPublisher *ipc.Publisher
-	ipcEnabled := os.Getenv("IPC_ENABLED") == "true"
+	// ==========================================================================
+	// IPC PUBLISHER - Always enabled for external streamer
+	// ==========================================================================
 	ipcSocketPath := getEnvWithDefault("IPC_SOCKET", ipc.DefaultSocketPath)
+	log.Println("Starting IPC publisher for external streamer...")
 
-	if ipcEnabled {
-		log.Println("📡 IPC Mode: Starting publisher for external streamer...")
-		ipcPublisher = ipc.NewPublisher(ipcSocketPath)
-		ipcPublisher.SetConfig(videoCfg.Width, videoCfg.Height, videoCfg.FPS, videoCfg.Bitrate)
+	ipcPublisher := ipc.NewPublisher(ipcSocketPath)
+	ipcPublisher.SetConfig(videoCfg.Width, videoCfg.Height, videoCfg.FPS, videoCfg.Bitrate)
 
-		if err := ipcPublisher.Start(); err != nil {
-			log.Printf("⚠️ Failed to start IPC publisher: %v", err)
-			ipcPublisher = nil
-		} else {
-			// Connect engine snapshot callback to IPC publisher
-			engine.OnSnapshot = func(snapshot *game.GameSnapshot) {
-				ipcPublisher.PublishSnapshot(snapshot)
-			}
-			log.Printf("✅ IPC Publisher started on %s", ipcSocketPath)
-			log.Println("💡 Start the external streamer with: go run ./cmd/streamer")
+	if err := ipcPublisher.Start(); err != nil {
+		log.Printf("WARNING: Failed to start IPC publisher: %v", err)
+		log.Println("External streamer will not be able to connect!")
+	} else {
+		// Connect engine snapshot callback to IPC publisher
+		engine.OnSnapshot = func(snapshot *game.GameSnapshot) {
+			ipcPublisher.PublishSnapshot(snapshot)
 		}
+		log.Printf("IPC Publisher started on %s", ipcSocketPath)
+		log.Println("")
+		log.Println(">>> To start streaming, run in another terminal:")
+		log.Println(">>> go run ./cmd/streamer")
+		log.Println("")
 	}
+
+	// ==========================================================================
+	// NO-OP STREAMER - API expects a streamer, but we don't stream from server
+	// ==========================================================================
+	// The API server needs a streamer interface for endpoints like /api/stats
+	// We use a NoOpStreamer that returns "streaming handled externally" status
+	noopStreamer := streaming.NewNoOpStreamer()
 
 	// Start event log
 	eventLogPath := getEnvWithDefault("EVENT_LOG_PATH", "events.jsonl")
 	if err := engine.StartEventLog(eventLogPath); err != nil {
-		log.Printf("⚠️ Event log disabled: %v", err)
+		log.Printf("Event log disabled: %v", err)
 	} else {
-		log.Printf("📝 Event log: %s", eventLogPath)
+		log.Printf("Event log: %s", eventLogPath)
 	}
 
 	// Start debug server
 	debugCfg := api.DefaultObservabilityConfig()
 	if os.Getenv("DISABLE_DEBUG_SERVER") != "true" {
 		if err := api.StartDebugServer(debugCfg); err != nil {
-			log.Printf("⚠️ Debug server disabled: %v", err)
+			log.Printf("Debug server disabled: %v", err)
 		}
 	}
-
-	// Music configuration from centralized config
-	musicPath := getEnvWithDefault("MUSIC_PATH", "assets/music/digital_fight_arena.ogg")
-
-	// Hardware encoding configuration
-	// USE_NVENC=true enables NVIDIA GPU hardware encoding (requires NVIDIA GPU with NVENC support)
-	// FORCE_NVENC=true skips the availability check and forces NVENC (use if test fails but you have NVENC)
-	// This significantly reduces CPU usage and improves streaming performance
-	useNVENC := os.Getenv("USE_NVENC") == "true"
-	forceNVENC := os.Getenv("FORCE_NVENC") == "true"
-
-	// Create stream manager with centralized video config
-	streamer := streaming.NewStreamManager(engine, streaming.StreamConfig{
-		Width:        videoCfg.Width,
-		Height:       videoCfg.Height,
-		FPS:          videoCfg.FPS,
-		Bitrate:      videoCfg.Bitrate,
-		RTMPURL:      rtmpURL,
-		StreamKey:    streamKey,
-		MusicEnabled: audioCfg.Enabled,
-		MusicVolume:  audioCfg.Volume,
-		MusicPath:    musicPath,
-		UseNVENC:     useNVENC,
-		ForceNVENC:   forceNVENC,
-	})
-
-	// Initialize avatar cache
-	avatarCache := avatar.NewCache(200)
-	_ = avatarCache
 
 	// Initialize Kick service for OAuth webhooks
 	var kickService *kick.Service
@@ -171,10 +149,10 @@ func main() {
 		// Create profile URL cache for lazy-loading avatars (non-blocking)
 		profileCache = kick.NewProfileURLCache(kickService, kick.DefaultProfileCacheConfig())
 
-		// Enable async webhook handling to prevent backpressure on FFmpeg
+		// Enable async webhook handling to prevent backpressure
 		kickService.SetAsyncHandler(true)
 
-		// Set broadcaster ID if avail
+		// Set broadcaster ID if available
 		if broadcasterID != "" {
 			bid, _ := strconv.ParseInt(broadcasterID, 10, 64)
 			kickService.SetBroadcasterID(bid)
@@ -191,13 +169,10 @@ func main() {
 				profilePic := msg.ProfilePic
 
 				// If profile picture is not in webhook, use cache (non-blocking)
-				// The cache will trigger an async fetch if not found
 				if profilePic == "" && msg.UserID != 0 {
-					// First, cache the URL if it came from webhook
 					if msg.ProfilePic != "" {
 						profileCache.Set(msg.UserID, msg.ProfilePic)
 					}
-					// Try to get from cache, triggers async fetch if missing
 					profilePic = profileCache.GetOrFetchAsync(msg.UserID)
 				}
 
@@ -211,7 +186,7 @@ func main() {
 
 				// Non-blocking enqueue - returns immediately
 				if !commandQueue.Enqueue(cmd) {
-					log.Printf("⚠️ Command queue full, dropped !%s from %s", cmd.Command, cmd.Username)
+					log.Printf("Command queue full, dropped !%s from %s", cmd.Command, cmd.Username)
 				}
 			}
 		})
@@ -225,52 +200,29 @@ func main() {
 			kickBot.QueueKill(killer.Name, victim.Name, killer.Weapon, killer.Kills)
 		}
 
-		log.Println("✅ Kick OAuth service initialized")
+		log.Println("Kick OAuth service initialized")
 
 		// Try to auto-subscribe if already authenticated
 		if kickService.IsConnected() {
-			log.Println("📡 Already authenticated, subscribing to chat events...")
+			log.Println("Already authenticated, subscribing to chat events...")
 			go func() {
-				// Initialize chatroom ID
-				log.Println("🔄 Fetching chatroom ID...")
+				log.Println("Fetching chatroom ID...")
 				if err := kickService.InitializeChatroomID(); err != nil {
-					log.Printf("⚠️ Failed to initialize chatroom ID: %v", err)
+					log.Printf("Failed to initialize chatroom ID: %v", err)
 				}
 
 				if err := kickService.SubscribeToChatEvents(); err != nil {
-					log.Printf("⚠️ Auto-subscribe failed: %v", err)
+					log.Printf("Auto-subscribe failed: %v", err)
 				}
 
-				// Auto-set category to Just Chatting
-				log.Println("🔄 Updating category to 'Just Chatting'...")
+				log.Println("Updating category to 'Just Chatting'...")
 				if err := kickService.SetCategory("Just Chatting"); err != nil {
-					log.Printf("⚠️ Failed to update category: %v", err)
+					log.Printf("Failed to update category: %v", err)
 				}
 			}()
 		}
 	} else {
-		log.Println("⚠️ CLIENT_ID_KICK or CLIENT_SECRET_KICK not set - OAuth disabled")
-	}
-
-	// Register stream start callback to set category to IRL
-	if kickService != nil {
-		// Capture kickService in closure
-		ks := kickService
-		streamer.OnStreamStart(func() {
-			// Try multiple category names in order of preference
-			categories := []string{"Just Chatting", "IRL", "just chatting"}
-
-			for _, cat := range categories {
-				log.Printf("🔄 Stream started, trying to set category to '%s'...", cat)
-				if err := ks.SetCategory(cat); err != nil {
-					log.Printf("⚠️ Failed to update category to %s: %v", cat, err)
-					continue // Try next category
-				}
-				log.Printf("✅ Category automatically set to '%s'", cat)
-				return // Success, stop trying
-			}
-			log.Println("❌ Failed to set category to any IRL variant")
-		})
+		log.Println("CLIENT_ID_KICK or CLIENT_SECRET_KICK not set - OAuth disabled")
 	}
 
 	// Setup Kick routes on separate mux BEFORE creating API server
@@ -296,9 +248,9 @@ func main() {
 
 	if adminAuthEnabled {
 		sessionManager = api.NewSessionManager(broadcasterIDInt)
-		log.Printf("🔐 Admin authentication ENABLED (broadcaster ID: %d)", broadcasterIDInt)
+		log.Printf("Admin authentication ENABLED (broadcaster ID: %d)", broadcasterIDInt)
 	} else {
-		log.Println("⚠️ Admin authentication DISABLED (set ADMIN_AUTH_ENABLED=true to enable)")
+		log.Println("Admin authentication DISABLED (set ADMIN_AUTH_ENABLED=true to enable)")
 	}
 
 	if kickService != nil {
@@ -317,25 +269,25 @@ func main() {
 		}
 
 		kickMux = mux
-		log.Printf("✅ Kick routes mounted at /api/kick (OAuth: localhost:%d, Webhook: %s/api/kick/webhook)", portInt, baseURL)
+		log.Printf("Kick routes mounted at /api/kick (OAuth: localhost:%d, Webhook: %s/api/kick/webhook)", portInt, baseURL)
 	}
 
-	// Create API server with Kick handler and auth
-	server := api.NewServerWithKickAndAuth(engine, streamer, kickMux, sessionManager, adminAuthEnabled)
+	// Create API server with NoOp streamer (streaming is external)
+	server := api.NewServerWithKickAndAuth(engine, noopStreamer, kickMux, sessionManager, adminAuthEnabled)
 
 	// Start game engine
 	engine.Start()
-	log.Println("✅ Game Engine started")
+	log.Println("Game Engine started")
 
 	// Start API server in goroutine
 	go func() {
 		addr := ":" + port
-		log.Printf("🌐 API server on http://localhost%s", addr)
-		log.Printf("🎮 Admin Panel: http://localhost%s/admin", addr)
+		log.Printf("API server on http://localhost%s", addr)
+		log.Printf("Admin Panel: http://localhost%s/admin", addr)
 
 		if kickService != nil {
-			log.Printf("🔑 Kick OAuth: %s/api/kick/auth", baseURL)
-			log.Printf("📡 Webhook URL: %s/api/kick/webhook", baseURL)
+			log.Printf("Kick OAuth: %s/api/kick/auth", baseURL)
+			log.Printf("Webhook URL: %s/api/kick/webhook", baseURL)
 		}
 
 		if err := server.Start(addr); err != nil {
@@ -344,21 +296,20 @@ func main() {
 	}()
 
 	log.Println("")
-	log.Println("📋 To enable chat commands:")
-	log.Println("   1. Start localtunnel: npx localtunnel --port 3000")
-	log.Println("   2. Set PUBLIC_URL in .env to tunnel URL")
-	log.Println("   3. Visit /api/kick/auth to login with Kick")
-	log.Println("   4. Type !join in Kick chat")
+	log.Println("To enable chat commands:")
+	log.Println("   1. Set PUBLIC_URL in .env to your ngrok URL")
+	log.Println("   2. Visit /api/kick/auth to login with Kick")
+	log.Println("   3. Type !join in Kick chat")
 	log.Println("")
 
 	// Wait for shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Println("✅ Server ready! Press Ctrl+C to stop.")
+	log.Println("Server ready! Press Ctrl+C to stop.")
 	<-quit
 
-	log.Println("🛑 Shutting down...")
+	log.Println("Shutting down...")
 
 	// Stop command queue first (drain pending commands)
 	commandQueue.Stop()
@@ -367,38 +318,21 @@ func main() {
 		kickBot.Stop()
 	}
 
-	// Stop IPC publisher if enabled
+	// Stop IPC publisher
 	if ipcPublisher != nil {
 		ipcPublisher.Stop()
 	}
 
-	streamer.Stop()
+	// Note: No streamer.Stop() - streaming is handled by external process
+
 	engine.StopEventLog()
 	engine.Stop()
-	log.Println("👋 Goodbye!")
+	log.Println("Goodbye!")
 }
 
 func getEnvWithDefault(key, defaultVal string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
-	}
-	return defaultVal
-}
-
-func getEnvInt(key string, defaultVal int) int {
-	if val := os.Getenv(key); val != "" {
-		if i, err := strconv.Atoi(val); err == nil {
-			return i
-		}
-	}
-	return defaultVal
-}
-
-func getEnvFloat(key string, defaultVal float64) float64 {
-	if val := os.Getenv(key); val != "" {
-		if f, err := strconv.ParseFloat(val, 64); err == nil {
-			return f
-		}
 	}
 	return defaultVal
 }
