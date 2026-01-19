@@ -458,7 +458,7 @@ func (s *StreamManager) Start() error {
 			"-rc", "cbr",           // Constant bitrate for streaming stability
 			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
 			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
-			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*4), // 4x buffer for network stability
 			"-pix_fmt", "yuv420p",
 			"-g", fmt.Sprintf("%d", s.config.FPS*2), // GOP size
 			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
@@ -476,7 +476,7 @@ func (s *StreamManager) Start() error {
 			"-tune", "zerolatency",
 			"-b:v", fmt.Sprintf("%dk", s.config.Bitrate),
 			"-maxrate", fmt.Sprintf("%dk", s.config.Bitrate),
-			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*2),
+			"-bufsize", fmt.Sprintf("%dk", s.config.Bitrate*4), // 4x buffer for network stability
 			"-pix_fmt", "yuv420p",
 			"-g", fmt.Sprintf("%d", s.config.FPS*2),
 			"-keyint_min", fmt.Sprintf("%d", s.config.FPS),
@@ -504,11 +504,12 @@ func (s *StreamManager) Start() error {
 		)
 	}
 
-	// Map streams and output
+	// Map streams and output with RTMP optimizations
 	args = append(args,
 		"-map", "0:v", // Video from stdin (pipe:0)
 		"-map", "1:a", // Audio from pipe:3
 		"-f", "flv",
+		"-flvflags", "no_duration_filesize", // Better for live streaming
 		rtmpURL,
 	)
 
