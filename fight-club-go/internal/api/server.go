@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"fight-club/internal/game"
-	"fight-club/internal/streaming"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -14,7 +13,7 @@ import (
 // It combines the HTTP router with WebSocket hub for real-time updates.
 type Server struct {
 	engine      *game.Engine
-	streamer    *streaming.StreamManager
+	streamer    StreamerInterface
 	router      *chi.Mux
 	wsHub       *WebSocketHub
 	rateLimiter *IPRateLimiter
@@ -28,17 +27,17 @@ type Server struct {
 // starting goroutines or opening network listeners.
 //
 // For testing HTTP endpoints without WebSocket support, use NewRouter() directly.
-func NewServer(engine *game.Engine, streamer *streaming.StreamManager) *Server {
+func NewServer(engine *game.Engine, streamer StreamerInterface) *Server {
 	return NewServerWithKick(engine, streamer, nil)
 }
 
 // NewServerWithKick creates a new API server with Kick OAuth support.
-func NewServerWithKick(engine *game.Engine, streamer *streaming.StreamManager, kickHandler http.Handler) *Server {
+func NewServerWithKick(engine *game.Engine, streamer StreamerInterface, kickHandler http.Handler) *Server {
 	return NewServerWithKickAndAuth(engine, streamer, kickHandler, nil, false)
 }
 
 // NewServerWithKickAndAuth creates a new API server with Kick OAuth and admin authentication support.
-func NewServerWithKickAndAuth(engine *game.Engine, streamer *streaming.StreamManager, kickHandler http.Handler, sessionMgr *SessionManager, enableAuth bool) *Server {
+func NewServerWithKickAndAuth(engine *game.Engine, streamer StreamerInterface, kickHandler http.Handler, sessionMgr *SessionManager, enableAuth bool) *Server {
 	s := &Server{
 		engine:      engine,
 		streamer:    streamer,
