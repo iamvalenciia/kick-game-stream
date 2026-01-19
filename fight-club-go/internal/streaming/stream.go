@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -359,7 +360,11 @@ func (s *StreamManager) Start() error {
 		return fmt.Errorf("already streaming")
 	}
 
-	rtmpURL := s.config.RTMPURL + "/" + s.config.StreamKey
+	// Build RTMP URL - check if stream key is already included to avoid duplication
+	rtmpURL := s.config.RTMPURL
+	if s.config.StreamKey != "" && !strings.Contains(s.config.RTMPURL, s.config.StreamKey) {
+		rtmpURL = s.config.RTMPURL + "/" + s.config.StreamKey
+	}
 
 	log.Println("🎬 Starting stream to Kick...")
 	log.Printf("   Resolution: %dx%d @ %d fps", s.config.Width, s.config.Height, s.config.FPS)
