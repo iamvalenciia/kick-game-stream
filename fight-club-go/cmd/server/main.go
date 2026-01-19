@@ -13,6 +13,7 @@ import (
 	"fight-club/internal/chat"
 	"fight-club/internal/config"
 	"fight-club/internal/game"
+	"fight-club/internal/ipc"
 	"fight-club/internal/kick"
 	"fight-club/internal/streaming"
 
@@ -83,6 +84,30 @@ func main() {
 	limits := engine.GetLimits()
 	log.Printf("🛡️ Resource limits: %d players, %d particles, %d effects, %d texts",
 		limits.MaxPlayers, limits.MaxParticles, limits.MaxEffects, limits.MaxTexts)
+
+	// IPC Publisher for external streamer process
+	// Enable with IPC_ENABLED=true to run streamer as separate process
+	var ipcPublisher *ipc.Publisher
+	ipcEnabled := os.Getenv("IPC_ENABLED") == "true"
+	ipcSocketPath := getEnvWithDefault("IPC_SOCKET", ipc.DefaultSocketPath)
+
+	if ipcEnabled {
+		log.Println("📡 IPC Mode: Starting publisher for external streamer...")
+		ipcPublisher = ipc.NewPublisher(ipcSocketPath)
+		ipcPublisher.SetConfig(videoCfg.Width, videoCfg.Height, videoCfg.FPS, videoCfg.Bitrate)
+
+		if err := ipcPublisher.Start(); err != nil {
+			log.Printf("⚠️ Failed to start IPC publisher: %v", err)
+			ipcPublisher = nil
+		} else {
+			// Connect engine snapshot callback to IPC publisher
+			engine.OnSnapshot = func(snapshot *game.GameSnapshot) {
+				ipcPublisher.PublishSnapshot(snapshot)
+			}
+			log.Printf("✅ IPC Publisher started on %s", ipcSocketPath)
+			log.Println("💡 Start the external streamer with: go run ./cmd/streamer")
+		}
+	}
 
 	// Start event log
 	eventLogPath := getEnvWithDefault("EVENT_LOG_PATH", "events.jsonl")
@@ -341,6 +366,12 @@ func main() {
 	if kickBot != nil {
 		kickBot.Stop()
 	}
+
+	// Stop IPC publisher if enabled
+	if ipcPublisher != nil {
+		ipcPublisher.Stop()
+	}
+
 	streamer.Stop()
 	engine.StopEventLog()
 	engine.Stop()

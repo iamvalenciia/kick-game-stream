@@ -54,10 +54,11 @@ type Engine struct {
 	tickCount  int64
 
 	// Event callbacks
-	onDamage  func(attacker, victim *Player, damage int)
-	OnKill    func(killer, victim *Player)
-	onJoin    func(player *Player)
-	onRespawn func(player *Player)
+	onDamage   func(attacker, victim *Player, damage int)
+	OnKill     func(killer, victim *Player)
+	onJoin     func(player *Player)
+	onRespawn  func(player *Player)
+	OnSnapshot func(snapshot *GameSnapshot) // Called after each snapshot is produced (for IPC)
 
 	// World bounds
 	worldWidth  float64
@@ -1027,6 +1028,11 @@ func (e *Engine) ProduceSnapshot() {
 	snap.AliveCount = aliveCount
 
 	e.snapshotPool.PublishWrite()
+
+	// Call OnSnapshot callback if set (used for IPC publishing)
+	if e.OnSnapshot != nil {
+		e.OnSnapshot(snap)
+	}
 }
 
 // StartEventLog initializes the event logging system
