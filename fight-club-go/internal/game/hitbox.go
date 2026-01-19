@@ -74,70 +74,82 @@ func (h *Hitbox) CheckHit(attackerX, attackerY, targetX, targetY, direction floa
 }
 
 // normalizeAngle normalizes an angle to the range [-π, π].
+// Uses O(1) modulo arithmetic instead of O(iterations) while loops.
 func normalizeAngle(angle float64) float64 {
-	for angle > math.Pi {
-		angle -= 2 * math.Pi
+	// Normalize to [0, 2π) first, then shift to [-π, π]
+	const twoPi = 2 * math.Pi
+	angle = math.Mod(angle, twoPi)
+	if angle < 0 {
+		angle += twoPi
 	}
-	for angle < -math.Pi {
-		angle += 2 * math.Pi
+	if angle > math.Pi {
+		angle -= twoPi
 	}
 	return angle
 }
 
+// cachedHitboxes stores the hitbox configurations to avoid map allocation on every call.
+// This is a package-level cache initialized once.
+var cachedHitboxes = map[string]Hitbox{
+	"fists": {
+		Type:  HitboxCircle,
+		Range: 80,
+	},
+	"knife": {
+		Type:  HitboxArc,
+		Range: 90,
+		Width: math.Pi / 2, // 90 degrees
+	},
+	"sword": {
+		Type:  HitboxArc,
+		Range: 100,
+		Width: 2 * math.Pi / 3, // 120 degrees
+	},
+	"spear": {
+		Type:  HitboxLine,
+		Range: 150,
+		Width: 15, // 15 pixel half-width (narrow thrust)
+	},
+	"axe": {
+		Type:  HitboxArc,
+		Range: 95,
+		Width: 5 * math.Pi / 6, // 150 degrees (wide cleave)
+	},
+	"bow": {
+		Type:  HitboxProjectile,
+		Range: 250, // Maximum projectile range (for AI targeting)
+	},
+	"katana": {
+		Type:  HitboxLine,
+		Range: 120,
+		Width: 20, // 20 pixel half-width
+	},
+	"hammer": {
+		Type:  HitboxCircle,
+		Range: 90,
+	},
+	"scythe": {
+		Type:  HitboxArc,
+		Range: 140,
+		Width: math.Pi, // 180 degrees (huge sweep)
+	},
+}
+
+// defaultFistsHitbox is cached for fallback to avoid map lookup.
+var defaultFistsHitbox = cachedHitboxes["fists"]
+
 // DefaultHitboxes returns hitbox configurations for each weapon.
+// Returns the cached map - callers should NOT modify the returned map.
 func DefaultHitboxes() map[string]Hitbox {
-	return map[string]Hitbox{
-		"fists": {
-			Type:  HitboxCircle,
-			Range: 80,
-		},
-		"knife": {
-			Type:  HitboxArc,
-			Range: 90,
-			Width: math.Pi / 2, // 90 degrees
-		},
-		"sword": {
-			Type:  HitboxArc,
-			Range: 100,
-			Width: 2 * math.Pi / 3, // 120 degrees
-		},
-		"spear": {
-			Type:  HitboxLine,
-			Range: 150,
-			Width: 15, // 15 pixel half-width (narrow thrust)
-		},
-		"axe": {
-			Type:  HitboxArc,
-			Range: 95,
-			Width: 5 * math.Pi / 6, // 150 degrees (wide cleave)
-		},
-		"bow": {
-			Type:  HitboxProjectile,
-			Range: 250, // Maximum projectile range (for AI targeting)
-		},
-		"katana": {
-			Type:  HitboxLine,
-			Range: 120,
-			Width: 20, // 20 pixel half-width
-		},
-		"hammer": {
-			Type:  HitboxCircle,
-			Range: 90,
-		},
-		"scythe": {
-			Type:  HitboxArc,
-			Range: 140,
-			Width: math.Pi, // 180 degrees (huge sweep)
-		},
-	}
+	return cachedHitboxes
 }
 
 // GetHitbox returns the hitbox for a weapon ID.
+// Uses cached map lookup - O(1) with no allocation.
 func GetHitbox(weaponID string) Hitbox {
-	hitboxes := DefaultHitboxes()
-	if h, ok := hitboxes[weaponID]; ok {
+	if h, ok := cachedHitboxes[weaponID]; ok {
 		return h
 	}
 	// Default to fists hitbox
-	return hitboxes["fists"]
+	return defaultFistsHitbox
 }
