@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Printf("IPC Socket: %s", socketPath)
+	log.Printf("IPC: %s", ipc.GetPlatformAddress(socketPath))
 	log.Printf("Video: %dx%d @ %d FPS, %dk bitrate", width, height, fps, bitrate)
 	log.Println("")
 	log.Println("DIRECT STREAMING (no ngrok/tunnel):")
