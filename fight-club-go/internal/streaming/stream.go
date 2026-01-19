@@ -254,11 +254,12 @@ func (s *StreamManager) OnStreamStart(callback func()) {
 // by running a quick FFmpeg test encode
 func checkNVENCAvailable() bool {
 	// Quick test: try to initialize NVENC encoder with a minimal test
-	// Using color source instead of nullsrc for better Windows compatibility
+	// NOTE: NVENC has minimum resolution requirements (~256x256 or higher)
+	// Using 256x256 instead of smaller sizes to avoid "Frame Dimension less than minimum" errors
 	cmd := exec.Command("ffmpeg",
 		"-y",                    // Overwrite output
 		"-f", "lavfi",
-		"-i", "color=c=black:s=64x64:d=0.1:r=30",
+		"-i", "color=c=black:s=256x256:d=0.1:r=30",
 		"-c:v", "h264_nvenc",
 		"-preset", "p1",         // Fastest preset
 		"-frames:v", "1",        // Only encode 1 frame
