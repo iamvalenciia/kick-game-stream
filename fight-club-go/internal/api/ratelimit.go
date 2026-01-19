@@ -257,5 +257,10 @@ func IsAllowedOrigin(origin string) bool {
 		return true
 	}
 
+	// Allow ngrok tunnels (commonly used for development/testing)
+	if strings.HasSuffix(origin, ".ngrok-free.dev") || strings.HasSuffix(origin, ".ngrok.io") {
+		return true
+	}
+
 	return false
 }

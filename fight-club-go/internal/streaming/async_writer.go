@@ -13,6 +13,10 @@ const (
 	MaxConsecutiveErrors = 10
 	// ErrorResetInterval - reset error count if no errors for this duration
 	ErrorResetInterval = 5 * time.Second
+	// BackpressureThresholdMultiplier - only warn when write takes this many times longer than target
+	BackpressureThresholdMultiplier = 3.0
+	// BackpressureLogInterval - only log backpressure warning every N slow frames
+	BackpressureLogInterval = 30
 )
 
 // AsyncFrameWriter handles non-blocking frame delivery to FFmpeg.
@@ -30,6 +34,9 @@ type AsyncFrameWriter struct {
 	writeErrors    uint64
 	lastWriteTime  time.Time
 	avgWriteTimeNs int64
+
+	// Backpressure tracking (to reduce log spam)
+	slowFrameCount int32 // atomic - counts slow frames for log throttling
 
 	// Connection health tracking
 	consecutiveErrors int32          // atomic - consecutive write failures
@@ -168,10 +175,14 @@ func (w *AsyncFrameWriter) Start(fps int) {
 				newAvg := (avgNs*9 + writeTime.Nanoseconds()) / 10
 				atomic.StoreInt64(&w.avgWriteTimeNs, newAvg)
 
-				// Warn if writes are taking too long
-				if writeTime > frameInterval {
-					log.Printf("⚠️ FFmpeg write took %.2fms (target: %.2fms) - possible backpressure",
-						writeTime.Seconds()*1000, frameInterval.Seconds()*1000)
+				// Warn if writes are taking significantly too long (throttled to reduce log spam)
+				backpressureThreshold := time.Duration(float64(frameInterval) * BackpressureThresholdMultiplier)
+				if writeTime > backpressureThreshold {
+					count := atomic.AddInt32(&w.slowFrameCount, 1)
+					if count%BackpressureLogInterval == 1 {
+						log.Printf("⚠️ FFmpeg backpressure: write took %.2fms (target: %.2fms) - %d slow frames total",
+							writeTime.Seconds()*1000, frameInterval.Seconds()*1000, count)
+					}
 				}
 			}
 		}
