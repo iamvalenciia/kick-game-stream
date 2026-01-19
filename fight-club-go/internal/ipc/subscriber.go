@@ -82,7 +82,7 @@ func (s *Subscriber) Start() error {
 	s.wg.Add(1)
 	go s.connectionLoop()
 
-	log.Printf("📡 IPC Subscriber started, connecting to %s", s.socketPath)
+	log.Printf("📡 IPC Subscriber started, connecting to %s", GetPlatformAddress(s.socketPath))
 	return nil
 }
 
@@ -195,12 +195,13 @@ func (s *Subscriber) connectionLoop() {
 
 // connect attempts to connect to the server
 func (s *Subscriber) connect() (net.Conn, error) {
-	conn, err := net.DialTimeout("unix", s.socketPath, time.Second)
+	// Use platform-specific connection (Unix socket on Linux/macOS, TCP on Windows)
+	conn, err := ConnectPlatform(s.socketPath)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("✅ Connected to server at %s", s.socketPath)
+	log.Printf("✅ Connected to server at %s", GetPlatformAddress(s.socketPath))
 	return conn, nil
 }
 

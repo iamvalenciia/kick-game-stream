@@ -367,6 +367,7 @@ func (s *StreamManager) Start() error {
 	}
 
 	log.Println("🎬 Starting stream to Kick...")
+	log.Println("   Mode: DIRECT RTMP (no proxy/tunnel - minimal latency)")
 	log.Printf("   Resolution: %dx%d @ %d fps", s.config.Width, s.config.Height, s.config.FPS)
 	log.Printf("   Bitrate: %dk", s.config.Bitrate)
 	log.Printf("   RTMP URL: %s", s.config.RTMPURL)
@@ -553,6 +554,9 @@ func (s *StreamManager) Start() error {
 	// This prevents the render loop from blocking when FFmpeg's pipe is full
 	s.asyncWriter = NewAsyncFrameWriter(s.frameRingBuffer, s.videoPipe)
 
+	// Set bitrate for connection quality recommendations
+	s.asyncWriter.SetBitrate(s.config.Bitrate)
+
 	// Set up auto-reconnection callback
 	s.asyncWriter.SetOnConnectionLost(func() {
 		go s.handleConnectionLost()
@@ -568,7 +572,7 @@ func (s *StreamManager) Start() error {
 		go s.audioLoop()
 	}
 
-	log.Println("✅ Stream started!")
+	log.Println("✅ Stream started! (Direct RTMP to Kick - no proxy overhead)")
 
 	// Trigger onStreamStart callback if set
 	if s.onStreamStart != nil {

@@ -71,8 +71,9 @@ func main() {
 		log.Printf("Broadcaster ID: %s", broadcasterID)
 	}
 	if publicURL != "" {
-		log.Printf("Public URL: %s", publicURL)
+		log.Printf("Public URL: %s (for webhooks/OAuth only - NOT for video streaming)", publicURL)
 	}
+	log.Println("Note: Video streaming goes DIRECT to Kick RTMP (no proxy/tunnel)")
 
 	// Create game engine with centralized config
 	engine := game.NewEngine(game.EngineConfig{
